@@ -156,7 +156,7 @@ td input[type=checkbox]{min-width:0;width:18px;height:18px}td select{min-width:1
 <section id="t-sys" class="hide">
  <div class="card"><h2>System</h2><div id="sysinfo" class="mono"></div>
   <div class="row" style="margin-top:12px"><button class="b" onclick="api('/api/reboot',{method:'POST'}).then(r=>toast(r.msg))">Restart</button>
-  <button class="b d" onclick="if(confirm('Overwrite factory profiles (ioniq5, g9, g6, p7plus)?'))api('/api/profile-defaults',{method:'POST'}).then(r=>{toast(r.msg);loadProfiles()})">Restore factory profiles</button></div></div>
+  <button class="b d" onclick="if(confirm('Overwrite factory profile (ioniq5)?'))api('/api/profile-defaults',{method:'POST'}).then(r=>{toast(r.msg);loadProfiles()})">Restore factory profiles</button></div></div>
  <div class="card"><h2>Backup &amp; restore</h2>
   <p class="hint" style="margin:0 0 10px">Saves all settings and vehicle profiles to a file – e.g. before re-flashing or to set up a second device.</p>
   <div class="row"><a class="b p" id="bkbtn" style="text-decoration:none" href="/api/backup?secrets=0">Download backup</a>
@@ -272,7 +272,7 @@ async function wscan(){const btn=$('wscanbtn');btn.disabled=true;btn.textContent
 function wpick(s){$('wifi_ssid').value=s;$('wscanl').innerHTML='';$('wifi_pass').value='';$('wifi_pass').focus();toast('Enter password, then “Save & restart”')}
 function pick(m,rnd,n){$('ble_mac').value=m;$('ble_name').value=n||'';$('ble_addr_type').value=rnd?'random':'public';toast('Applied – don’t forget to save')}
 // ---------- Profile ----------
-const DC=['','battery','voltage','current','power','energy','temperature','distance','speed','duration'];
+const DC=['','battery','voltage','current','power','energy','temperature','pressure','distance','speed','duration'];
 let pnames={};const pname=id=>pnames[id]||id;
 async function loadProfiles(){const r=await api('/api/profiles');active=r.active;pnames=r.names||{};
  const ids=[...r.list].sort((a,b)=>pname(a).localeCompare(pname(b)));

@@ -13,6 +13,8 @@
 
 // Hyundai IONIQ 5 / Kia EV6 / IONIQ 6 (E-GMP)
 // Offsets from evDash (CarHyundaiEgmp.cpp), cross-checked against WiCAN ioniq5-6.json and OVMS
+// Tyres (TPMS, header 7A0, 22C00B): pressure raw×0.2 psi → bar, temperature raw−50 °C (evDash, matches WiCAN);
+//   0xFF (sensor not seen) = 3.52 bar → rejected by max 3.5
 static const char PROFILE_IONIQ5[] PROGMEM = R"JSON({
   "name": "Hyundai IONIQ 5 / Kia EV6",
   "model": "Hyundai IONIQ 5 (E-GMP)",
@@ -63,199 +65,35 @@ static const char PROFILE_IONIQ5[] PROGMEM = R"JSON({
       "interval": 120, "min": 0, "max": 1, "precision": 0, "enabled": true, "sleep_zero": true },
     { "id": "charging_dc", "name": "DC charging", "header": "7E4", "cmd": "220101",
       "formula": "gt(-s16(B13,B14)*u16(B15,B16)/100000,11.5)", "icon": "mdi:ev-plug-ccs2", "state_class": "",
-      "interval": 120, "min": 0, "max": 1, "precision": 0, "enabled": true, "sleep_zero": true }
-  ]
-})JSON";
-
-// XPeng G9 (also G6/P5/P7/X9) – BMS via header 704, response from 784.
-// Sources: WiCAN xpeng_g6.json, corrected per XPCarData (github.com/stevelea/xpcardata, verified on the G6):
-//   SOH = 22110A (not 22011A as in WiCAN), odometer = 3 bytes, range = 221118 (CLTC).
-// Not yet verified on the G9 (esp. MY25) – check every PID with "Test" against the car's display.
-static const char PROFILE_G9[] PROGMEM = R"JSON({
-  "name": "XPeng G9",
-  "model": "XPeng G9",
-  "battery_kwh": 92.2, "consumption": 20,
-  "battery_options": [
-    { "name": "78.2 kWh – Standard Range (MY25)", "kwh": 78.2 },
-    { "name": "92.2 kWh – Long Range / Performance (MY25)", "kwh": 92.2 },
-    { "name": "98 kWh – 2023/2024 (usable approx. 93 kWh)", "kwh": 93 }
-  ],
-  "init": ["ATZ", "ATE0", "ATL0", "ATS0", "ATH0", "ATSP6", "ATAT1", "ATAL", "ATCRA784", "ATFCSH704", "ATFCSD300000", "ATFCSM1"],
-  "pids": [
-    { "id": "soc", "name": "SoC", "header": "704", "cmd": "221109",
-      "formula": "u16(B3,B4)/10", "unit": "%", "device_class": "battery",
-      "interval": 120, "min": 0, "max": 100, "precision": 1, "enabled": true },
-    { "id": "bat_temp_max", "name": "Battery temp max", "header": "704", "cmd": "221107",
-      "formula": "B3-40", "unit": "°C", "device_class": "temperature",
-      "interval": 300, "min": -40, "max": 90, "precision": 0, "enabled": true },
-    { "id": "bat_temp_min", "name": "Battery temp min", "header": "704", "cmd": "221108",
-      "formula": "B3-40", "unit": "°C", "device_class": "temperature",
-      "interval": 300, "min": -40, "max": 90, "precision": 0, "enabled": true },
-    { "id": "odometer", "name": "Odometer", "header": "704", "cmd": "220101",
-      "formula": "B3*65536+B4*256+B5", "unit": "km", "device_class": "distance",
-      "state_class": "total_increasing", "icon": "mdi:counter",
-      "interval": 1800, "min": 1, "max": 2000000, "precision": 0, "enabled": true },
-    { "id": "range_cltc", "name": "Range (CLTC)", "header": "704", "cmd": "221118",
-      "formula": "u16(B3,B4)", "unit": "km", "device_class": "distance",
-      "icon": "mdi:map-marker-distance",
-      "interval": 300, "min": 0, "max": 1000, "precision": 0, "enabled": true },
-    { "id": "range_calc", "name": "Range (calculated)", "header": "704", "cmd": "221109",
-      "formula": "u16(B3,B4)/10*CAP/CONS", "unit": "km", "device_class": "distance",
-      "icon": "mdi:map-marker-distance",
-      "interval": 120, "min": 0, "max": 800, "precision": 0, "enabled": true },
-    { "id": "soh", "name": "SoH", "header": "704", "cmd": "22110A",
-      "formula": "u16(B3,B4)/10", "unit": "%", "icon": "mdi:battery-heart-variant",
-      "interval": 3600, "min": 0, "max": 100, "precision": 1, "enabled": true },
-    { "id": "charge_limit", "name": "Charge limit", "header": "704", "cmd": "221130",
-      "formula": "u16(B3,B4)-10", "unit": "%", "icon": "mdi:battery-charging-high",
-      "interval": 900, "min": 0, "max": 100, "precision": 0, "enabled": true },
-    { "id": "charge_status", "name": "Charging status (raw, 0 = not charging)", "header": "704", "cmd": "22112D",
-      "formula": "B3", "state_class": "", "icon": "mdi:ev-station",
-      "interval": 120, "min": 0, "max": 10, "precision": 0, "enabled": true, "sleep_zero": true },
-    { "id": "hv_voltage", "name": "HV voltage", "header": "704", "cmd": "221101",
-      "formula": "u16(B3,B4)/10", "unit": "V", "device_class": "voltage",
-      "interval": 120, "min": 0, "max": 1000, "precision": 1, "enabled": true },
-    { "id": "hv_current", "name": "HV current (negative = charging)", "header": "704", "cmd": "221103",
-      "formula": "u16(B3,B4)*0.5-1600", "unit": "A", "device_class": "current",
-      "interval": 120, "min": -1600, "max": 1600, "precision": 1, "enabled": true, "sleep_zero": true },
-    { "id": "charge_power", "name": "Charging power", "header": "704", "cmd": "221103",
-      "formula": "max(0,-(u16(B3,B4)*0.5-1600)*hv_voltage/1000)", "unit": "kW", "device_class": "power",
-      "interval": 120, "min": 0, "max": 500, "precision": 1, "enabled": true, "sleep_zero": true },
-    { "id": "charging", "name": "Charging", "header": "704", "cmd": "221103",
-      "formula": "lt(u16(B3,B4)*0.5-1600,-2)", "icon": "mdi:ev-station", "state_class": "",
       "interval": 120, "min": 0, "max": 1, "precision": 0, "enabled": true, "sleep_zero": true },
-    { "id": "charging_dc", "name": "DC charging", "header": "704", "cmd": "221103",
-      "formula": "gt(-(u16(B3,B4)*0.5-1600)*hv_voltage/1000,11.5)", "icon": "mdi:ev-plug-ccs2", "state_class": "",
-      "interval": 120, "min": 0, "max": 1, "precision": 0, "enabled": true, "sleep_zero": true }
+    { "id": "tyre_p_fl", "name": "Tyre pressure front left", "header": "7A0", "cmd": "22C00B",
+      "formula": "B7*0.2/14.5038", "unit": "bar", "device_class": "pressure", "icon": "mdi:car-tire-alert",
+      "interval": 300, "min": 0.5, "max": 3.5, "precision": 2, "enabled": true },
+    { "id": "tyre_p_fr", "name": "Tyre pressure front right", "header": "7A0", "cmd": "22C00B",
+      "formula": "B12*0.2/14.5038", "unit": "bar", "device_class": "pressure", "icon": "mdi:car-tire-alert",
+      "interval": 300, "min": 0.5, "max": 3.5, "precision": 2, "enabled": true },
+    { "id": "tyre_p_rl", "name": "Tyre pressure rear left", "header": "7A0", "cmd": "22C00B",
+      "formula": "B17*0.2/14.5038", "unit": "bar", "device_class": "pressure", "icon": "mdi:car-tire-alert",
+      "interval": 300, "min": 0.5, "max": 3.5, "precision": 2, "enabled": true },
+    { "id": "tyre_p_rr", "name": "Tyre pressure rear right", "header": "7A0", "cmd": "22C00B",
+      "formula": "B22*0.2/14.5038", "unit": "bar", "device_class": "pressure", "icon": "mdi:car-tire-alert",
+      "interval": 300, "min": 0.5, "max": 3.5, "precision": 2, "enabled": true },
+    { "id": "tyre_t_fl", "name": "Tyre temp front left", "header": "7A0", "cmd": "22C00B",
+      "formula": "B8-50", "unit": "°C", "device_class": "temperature",
+      "interval": 300, "min": -40, "max": 120, "precision": 0, "enabled": true },
+    { "id": "tyre_t_fr", "name": "Tyre temp front right", "header": "7A0", "cmd": "22C00B",
+      "formula": "B13-50", "unit": "°C", "device_class": "temperature",
+      "interval": 300, "min": -40, "max": 120, "precision": 0, "enabled": true },
+    { "id": "tyre_t_rl", "name": "Tyre temp rear left", "header": "7A0", "cmd": "22C00B",
+      "formula": "B18-50", "unit": "°C", "device_class": "temperature",
+      "interval": 300, "min": -40, "max": 120, "precision": 0, "enabled": true },
+    { "id": "tyre_t_rr", "name": "Tyre temp rear right", "header": "7A0", "cmd": "22C00B",
+      "formula": "B23-50", "unit": "°C", "device_class": "temperature",
+      "interval": 300, "min": -40, "max": 120, "precision": 0, "enabled": true }
   ]
 })JSON";
-// XPeng G6 – same BMS PIDs as the G9 (704/784). The XPCarData values are verified on the G6.
-// Range (calculated): adjust capacity/consumption to your variant (SR approx. 66 kWh, LR approx. 87.5 kWh gross).
-static const char PROFILE_G6[] PROGMEM = R"JSON({
-  "name": "XPeng G6",
-  "model": "XPeng G6",
-  "battery_kwh": 80, "consumption": 19,
-  "battery_options": [
-    { "name": "68.5 kWh – Standard Range (MY25)", "kwh": 67.8 },
-    { "name": "80.8 kWh – Long Range / AWD (MY25)", "kwh": 80 },
-    { "name": "66 kWh – 2024 (usable approx. 64 kWh)", "kwh": 64 },
-    { "name": "87.5 kWh – 2024 (usable approx. 84 kWh)", "kwh": 84 }
-  ],
-  "init": ["ATZ", "ATE0", "ATL0", "ATS0", "ATH0", "ATSP6", "ATAT1", "ATAL", "ATCRA784", "ATFCSH704", "ATFCSD300000", "ATFCSM1"],
-  "pids": [
-    { "id": "soc", "name": "SoC", "header": "704", "cmd": "221109",
-      "formula": "u16(B3,B4)/10", "unit": "%", "device_class": "battery",
-      "interval": 120, "min": 0, "max": 100, "precision": 1, "enabled": true },
-    { "id": "bat_temp_max", "name": "Battery temp max", "header": "704", "cmd": "221107",
-      "formula": "B3-40", "unit": "°C", "device_class": "temperature",
-      "interval": 300, "min": -40, "max": 90, "precision": 0, "enabled": true },
-    { "id": "bat_temp_min", "name": "Battery temp min", "header": "704", "cmd": "221108",
-      "formula": "B3-40", "unit": "°C", "device_class": "temperature",
-      "interval": 300, "min": -40, "max": 90, "precision": 0, "enabled": true },
-    { "id": "odometer", "name": "Odometer", "header": "704", "cmd": "220101",
-      "formula": "B3*65536+B4*256+B5", "unit": "km", "device_class": "distance",
-      "state_class": "total_increasing", "icon": "mdi:counter",
-      "interval": 1800, "min": 1, "max": 2000000, "precision": 0, "enabled": true },
-    { "id": "range_cltc", "name": "Range (CLTC)", "header": "704", "cmd": "221118",
-      "formula": "u16(B3,B4)", "unit": "km", "device_class": "distance",
-      "icon": "mdi:map-marker-distance",
-      "interval": 300, "min": 0, "max": 1000, "precision": 0, "enabled": true },
-    { "id": "range_calc", "name": "Range (calculated)", "header": "704", "cmd": "221109",
-      "formula": "u16(B3,B4)/10*CAP/CONS", "unit": "km", "device_class": "distance",
-      "icon": "mdi:map-marker-distance",
-      "interval": 120, "min": 0, "max": 800, "precision": 0, "enabled": true },
-    { "id": "soh", "name": "SoH", "header": "704", "cmd": "22110A",
-      "formula": "u16(B3,B4)/10", "unit": "%", "icon": "mdi:battery-heart-variant",
-      "interval": 3600, "min": 0, "max": 100, "precision": 1, "enabled": true },
-    { "id": "charge_limit", "name": "Charge limit", "header": "704", "cmd": "221130",
-      "formula": "u16(B3,B4)-10", "unit": "%", "icon": "mdi:battery-charging-high",
-      "interval": 900, "min": 0, "max": 100, "precision": 0, "enabled": true },
-    { "id": "charge_status", "name": "Charging status (raw, 0 = not charging)", "header": "704", "cmd": "22112D",
-      "formula": "B3", "state_class": "", "icon": "mdi:ev-station",
-      "interval": 120, "min": 0, "max": 10, "precision": 0, "enabled": true, "sleep_zero": true },
-    { "id": "hv_voltage", "name": "HV voltage", "header": "704", "cmd": "221101",
-      "formula": "u16(B3,B4)/10", "unit": "V", "device_class": "voltage",
-      "interval": 120, "min": 0, "max": 1000, "precision": 1, "enabled": true },
-    { "id": "hv_current", "name": "HV current (negative = charging)", "header": "704", "cmd": "221103",
-      "formula": "u16(B3,B4)*0.5-1600", "unit": "A", "device_class": "current",
-      "interval": 120, "min": -1600, "max": 1600, "precision": 1, "enabled": true, "sleep_zero": true },
-    { "id": "charge_power", "name": "Charging power", "header": "704", "cmd": "221103",
-      "formula": "max(0,-(u16(B3,B4)*0.5-1600)*hv_voltage/1000)", "unit": "kW", "device_class": "power",
-      "interval": 120, "min": 0, "max": 500, "precision": 1, "enabled": true, "sleep_zero": true },
-    { "id": "charging", "name": "Charging", "header": "704", "cmd": "221103",
-      "formula": "lt(u16(B3,B4)*0.5-1600,-2)", "icon": "mdi:ev-station", "state_class": "",
-      "interval": 120, "min": 0, "max": 1, "precision": 0, "enabled": true, "sleep_zero": true },
-    { "id": "charging_dc", "name": "DC charging", "header": "704", "cmd": "221103",
-      "formula": "gt(-(u16(B3,B4)*0.5-1600)*hv_voltage/1000,11.5)", "icon": "mdi:ev-plug-ccs2", "state_class": "",
-      "interval": 120, "min": 0, "max": 1, "precision": 0, "enabled": true, "sleep_zero": true }
-  ]
-})JSON";
-
-// XPeng P7+ – EXPERIMENTAL: no published PIDs; assumes the same BMS addressing (704/784)
-// as the G6/G9. Please check every value with "Test". Adjust the capacity for the calculated range.
-static const char PROFILE_P7PLUS[] PROGMEM = R"JSON({
-  "name": "XPeng P7+ (experimental)",
-  "model": "XPeng P7+",
-  "battery_kwh": 74.9, "consumption": 16,
-  "battery_options": [
-    { "name": "61.7 kWh – Standard Range (usable 59.6 kWh)", "kwh": 59.6 },
-    { "name": "74.9 kWh – Long Range / Performance", "kwh": 74.9 }
-  ],
-  "init": ["ATZ", "ATE0", "ATL0", "ATS0", "ATH0", "ATSP6", "ATAT1", "ATAL", "ATCRA784", "ATFCSH704", "ATFCSD300000", "ATFCSM1"],
-  "pids": [
-    { "id": "soc", "name": "SoC", "header": "704", "cmd": "221109",
-      "formula": "u16(B3,B4)/10", "unit": "%", "device_class": "battery",
-      "interval": 120, "min": 0, "max": 100, "precision": 1, "enabled": true },
-    { "id": "bat_temp_max", "name": "Battery temp max", "header": "704", "cmd": "221107",
-      "formula": "B3-40", "unit": "°C", "device_class": "temperature",
-      "interval": 300, "min": -40, "max": 90, "precision": 0, "enabled": true },
-    { "id": "bat_temp_min", "name": "Battery temp min", "header": "704", "cmd": "221108",
-      "formula": "B3-40", "unit": "°C", "device_class": "temperature",
-      "interval": 300, "min": -40, "max": 90, "precision": 0, "enabled": true },
-    { "id": "odometer", "name": "Odometer", "header": "704", "cmd": "220101",
-      "formula": "B3*65536+B4*256+B5", "unit": "km", "device_class": "distance",
-      "state_class": "total_increasing", "icon": "mdi:counter",
-      "interval": 1800, "min": 1, "max": 2000000, "precision": 0, "enabled": true },
-    { "id": "range_cltc", "name": "Range (CLTC)", "header": "704", "cmd": "221118",
-      "formula": "u16(B3,B4)", "unit": "km", "device_class": "distance",
-      "icon": "mdi:map-marker-distance",
-      "interval": 300, "min": 0, "max": 1000, "precision": 0, "enabled": true },
-    { "id": "range_calc", "name": "Range (calculated)", "header": "704", "cmd": "221109",
-      "formula": "u16(B3,B4)/10*CAP/CONS", "unit": "km", "device_class": "distance",
-      "icon": "mdi:map-marker-distance",
-      "interval": 120, "min": 0, "max": 800, "precision": 0, "enabled": true },
-    { "id": "soh", "name": "SoH", "header": "704", "cmd": "22110A",
-      "formula": "u16(B3,B4)/10", "unit": "%", "icon": "mdi:battery-heart-variant",
-      "interval": 3600, "min": 0, "max": 100, "precision": 1, "enabled": true },
-    { "id": "charge_limit", "name": "Charge limit", "header": "704", "cmd": "221130",
-      "formula": "u16(B3,B4)-10", "unit": "%", "icon": "mdi:battery-charging-high",
-      "interval": 900, "min": 0, "max": 100, "precision": 0, "enabled": true },
-    { "id": "charge_status", "name": "Charging status (raw, 0 = not charging)", "header": "704", "cmd": "22112D",
-      "formula": "B3", "state_class": "", "icon": "mdi:ev-station",
-      "interval": 120, "min": 0, "max": 10, "precision": 0, "enabled": true, "sleep_zero": true },
-    { "id": "hv_voltage", "name": "HV voltage", "header": "704", "cmd": "221101",
-      "formula": "u16(B3,B4)/10", "unit": "V", "device_class": "voltage",
-      "interval": 120, "min": 0, "max": 1000, "precision": 1, "enabled": true },
-    { "id": "hv_current", "name": "HV current (negative = charging)", "header": "704", "cmd": "221103",
-      "formula": "u16(B3,B4)*0.5-1600", "unit": "A", "device_class": "current",
-      "interval": 120, "min": -1600, "max": 1600, "precision": 1, "enabled": true, "sleep_zero": true },
-    { "id": "charge_power", "name": "Charging power", "header": "704", "cmd": "221103",
-      "formula": "max(0,-(u16(B3,B4)*0.5-1600)*hv_voltage/1000)", "unit": "kW", "device_class": "power",
-      "interval": 120, "min": 0, "max": 500, "precision": 1, "enabled": true, "sleep_zero": true },
-    { "id": "charging", "name": "Charging", "header": "704", "cmd": "221103",
-      "formula": "lt(u16(B3,B4)*0.5-1600,-2)", "icon": "mdi:ev-station", "state_class": "",
-      "interval": 120, "min": 0, "max": 1, "precision": 0, "enabled": true, "sleep_zero": true },
-    { "id": "charging_dc", "name": "DC charging", "header": "704", "cmd": "221103",
-      "formula": "gt(-(u16(B3,B4)*0.5-1600)*hv_voltage/1000,11.5)", "icon": "mdi:ev-plug-ccs2", "state_class": "",
-      "interval": 120, "min": 0, "max": 1, "precision": 0, "enabled": true, "sleep_zero": true }
-  ]
-})JSON";
-
 
 struct DefaultProfile { const char* file; const char* json; };
 static const DefaultProfile DEFAULT_PROFILES[] = {
   { "ioniq5", PROFILE_IONIQ5 },
-  { "g9",     PROFILE_G9 },
-  { "g6",     PROFILE_G6 },
-  { "p7plus", PROFILE_P7PLUS },
 };

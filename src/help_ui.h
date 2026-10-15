@@ -115,7 +115,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <p>Click <b>Save &amp; restart</b>. The ESP32 now connects to your WiFi. Afterwards you can reach it at <code>http://obd2mqtt.local</code> or at the IP address assigned by your router (see the device list of your router).</p>
 <h3>4.6 Choose the vehicle profile</h3>
 <ol>
-<li>Tab <b>Profile</b> → choose the matching profile (e.g. “Hyundai IONIQ 5 / Kia EV6” or “XPeng G9”) → <b>Activate</b>.</li>
+<li>Tab <b>Profile</b> → choose the matching profile (“Hyundai IONIQ 5 / Kia EV6”) → <b>Activate</b>.</li>
 <li>Switch the car on or let it charge, then click <b>Test</b> next to “soc”. If a plausible value appears, everything is set up.</li>
 </ol>
 <div class="box ok">Done! From now on the <b>Status</b> tab shows the current values, and a new device appears in Home Assistant.</div>
@@ -164,20 +164,16 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <tr><td>BLE signal / Last error</td><td>Diagnostics</td></tr>
 </table>
 <p>You can use the SoC e.g. in <b>evcc</b> as vehicle SoC or for automations (“notify me at 80 %”).</p>
-<p>For your own evaluations the device additionally sends all values including the profile as one JSON to <code>obd2mqtt/state</code> after each poll, e.g. <code>{"profile":"XPeng G9","values":{"soc":71.5,…}}</code>.</p>
+<p>For your own evaluations the device additionally sends all values including the profile as one JSON to <code>obd2mqtt/state</code> after each poll, e.g. <code>{"profile":"Hyundai IONIQ 5 / Kia EV6","values":{"soc":71.5,…}}</code>.</p>
 </section>
 
 <section id="values">
 <h2>7. Which values are available?</h2>
 <p>In the <b>Profile</b> tab you can enable or disable individual values with the checkbox in column “Active” – the checkbox in the column header switches all at once – and then click <b>Save profile</b>. In the factory profiles all values are active.</p>
 <h3>Hyundai IONIQ 5 (also Kia EV6, IONIQ 6)</h3>
-<p>All values are active: SoC, battery temperature max/min, odometer, SoH (battery health), raw BMS SoC and calculated range.</p>
-<h3>XPeng G9, G6 and P7+</h3>
-<p>One profile each (<code>g9</code>, <code>g6</code>, <code>p7plus</code>) with the same values, all active: SoC, battery temperature max/min, odometer, range (CLTC), SoH, charge limit, charging status, HV voltage/current, calculated range and the standard OBD2 SoC.</p>
-<p>The <b>G6</b> is verified best. According to user reports the G9 uses the same commands. For the <b>P7+</b> no values have been published yet – the profile is an attempt based on G6/G9.</p>
-<div class="box warn">The XPeng values come from the community and have not been verified for every model year – compare them once with the display in the car.</div>
+<p>All values are active: SoC, battery temperature max/min, odometer, SoH (battery health), raw BMS SoC, calculated range, HV voltage/current, charging power, charging / DC charging, and tyre pressure/temperature for all four tyres.</p>
 <h3>Range</h3>
-<p>The range shown in the cockpit cannot be read. “Range (calculated)” estimates it from SoC × battery capacity ÷ consumption. Adapt the formula to your car, e.g. <code>B34/2/100*63/0.17</code> for 63 kWh and 17 kWh/100 km. The XPeng additionally offers the “CLTC range” – usually 15–20 % more optimistic than WLTP.</p>
+<p>The range shown in the cockpit cannot be read. “Range (calculated)” estimates it from SoC × battery capacity ÷ consumption. Adapt the formula to your car, e.g. <code>B34/2/100*63/0.17</code> for 63 kWh and 17 kWh/100 km.</p>
 <h3>How often is polled?</h3>
 <p>Column <b>Interval s</b> in the profile: SoC every 120 s, temperatures every 300 s, odometer every 1800 s. Values with the same command are best polled with the same interval.</p>
 </section>
@@ -191,7 +187,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <li>Adjust the formula until the value is correct. Helpers: <code>u16(B3,B4)</code> = 2-byte number, <code>s8(B5)</code> = signed number, <code>bit(B6,2)</code> = single bit, <code>lt(a,b)</code>/<code>gt(a,b)</code> = comparison (1/0), <code>min</code>/<code>max</code>, <code>CAP</code>/<code>CONS</code> = battery capacity/consumption. Use the last value of another value by its ID, e.g. <code>-(u16(B3,B4)*0.5-1600)*hv_voltage/1000</code> = charging power from current and voltage.</li>
 <li>Set unit, class and interval, tick “Active” and click <b>Save profile</b>. Home Assistant creates the sensor automatically.</li>
 </ol>
-<p>Tip: use <b>Save copy…</b> beforehand to back up your profile – just enter a name, e.g. “My G9”. You change the display name of a profile in the <b>Name</b> field.</p>
+<p>Tip: use <b>Save copy…</b> beforehand to back up your profile – just enter a name, e.g. “My IONIQ 5”. You change the display name of a profile in the <b>Name</b> field.</p>
 </section>
 
 <section id="update">
@@ -200,7 +196,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <li>Tab <b>System</b> → under “Firmware update” choose the file <code>obd2mqtt-vX.Y.Z-esp32-<b>ota</b>.bin</code>.</li>
 <li>Click <b>Upload</b>. The bar shows the progress, afterwards the ESP32 restarts and the page shows the new version.</li>
 </ol>
-<p>Settings and profiles are kept. What has changed is listed in the <b>Changelog</b> in the System tab. New factory profiles are applied with <b>Restore factory profiles</b> (overwrites your own changes to <code>ioniq5</code>/<code>g9</code>).</p>
+<p>Settings and profiles are kept. What has changed is listed in the <b>Changelog</b> in the System tab. New factory profiles are applied with <b>Restore factory profiles</b> (overwrites your own changes to <code>ioniq5</code>).</p>
 </section>
 
 <section id="backup">

@@ -75,7 +75,6 @@ extern Profile profile;
 bool fsBegin();
 bool loadConfig();
 bool saveConfig();
-void migrateProfiles();              // repair stored profiles (e.g. missing ATFCSD)
 void configToJson(JsonDocument& doc, bool maskSecrets);
 void configFromJson(JsonVariantConst src);   // "********" = leave value unchanged
 

@@ -179,7 +179,6 @@ void setup() {
   if (!fsOk) logf("LittleFS error!");
   Watchdog::begin();
   logBootCheck(Watchdog::crashCount());
-  migrateProfiles();
   if (!cfgOk) logf("%s", "No configuration – using defaults");
   logSetPersist(cfg.logPersist);
   configTzTime(cfg.tz.c_str(), cfg.ntpServer.c_str(), "time.cloudflare.com");

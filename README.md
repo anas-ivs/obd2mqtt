@@ -1,6 +1,6 @@
 # OBD2MQTT – BLE-OBD2 → MQTT → Home Assistant
 
-> **Beta.** Tested on a Hyundai IONIQ 5. The XPeng profiles (G6, G9, P7+) are still **untested** – feedback is very welcome (GitHub issue or forum).
+> **Beta.** Tested on a Hyundai IONIQ 5.
 
 **[⬇ Download: latest firmware (Releases)](../../releases/latest)** · [Manual](docs/manual_en.html) · [Changelog](CHANGELOG.en.md)
 
@@ -15,7 +15,7 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 ## Features
 
 - BLE client for ELM327 dongles (auto-detects common UUIDs: FFF0, FFE0, 18F0, vLinker; can be overridden manually)
-- Vehicle profiles as JSON (pre-installed: Hyundai IONIQ 5 / Kia EV6, XPeng G6, G9 and P7+), editable in the web UI
+- Vehicle profiles as JSON (pre-installed: Hyundai IONIQ 5 / Kia EV6), editable in the web UI
 - Web interface and built-in manual (English), backup/restore of all settings, log with real time (NTP)
 - PIDs with freely definable formulas (`B34/2`, `u16(B28,B29)/10`, `s16(..)`, `s8(..)`, `bit(x,n)`)
 - **Test button** per PID: shows every response byte with its index so you can easily find byte positions
@@ -62,7 +62,7 @@ All values of the factory profiles are enabled by default; you can switch indivi
 
 ### Hyundai IONIQ 5 (also Kia EV6 / IONIQ 6, E-GMP)
 
-Init: `ATZ ATE0 ATL0 ATS0 ATH0 ATSP6 ATAT0 ATSTFF ATFCSH7E4 ATFCSD300000 ATFCSM1`. `ATAT0` (no adaptive timing) and the explicit flow control make long responses (`220101`, 62 bytes) reliable on cheap ELM327 clones – in a test with an "OBDII v1.5" dongle it went from 0 of 3 to 6 of 7 complete responses. The flow-control address follows each header change automatically (`7E4`, `7C6`).
+Init: `ATZ ATE0 ATL0 ATS0 ATH0 ATSP6 ATAT0 ATSTFF ATFCSH7E4 ATFCSD300000 ATFCSM1`. `ATAT0` (no adaptive timing) and the explicit flow control make long responses (`220101`, 62 bytes) reliable on cheap ELM327 clones – in a test with an "OBDII v1.5" dongle it went from 0 of 3 to 6 of 7 complete responses. The flow-control address follows each header change automatically (`7E4`, `7C6`, `7A0`).
 
 | ID | Header | Command | Formula | Meaning |
 |---|---|---|---|---|
@@ -75,46 +75,14 @@ Init: `ATZ ATE0 ATL0 ATS0 ATH0 ATSP6 ATAT0 ATSTFF ATFCSH7E4 ATFCSD300000 ATFCSM1
 | `hv_current` / `hv_voltage` | 7E4 | 220101 | `s16(B13,B14)/10` / `u16(B15,B16)/10` | HV current (negative = charging) / HV voltage |
 | `charge_power` | 7E4 | 220101 | `max(0,-s16(B13,B14)*u16(B15,B16)/100000)` | charging power kW |
 | `charging` / `charging_dc` | 7E4 | 220101 | `lt(s16(B13,B14),-5)` / `gt(…kW…,11.5)` | charging (current < −0.5 A) / DC charging (> 11.5 kW) – confirmed on an IONIQ 5 (AC charging 3.7 kW: −7.0 A at 527.5 V). The charging bits in byte 12 always stay 0 on the IONIQ 5 |
+| `tyre_p_fl/fr/rl/rr` | 7A0 | 22C00B | `B7`/`B12`/`B17`/`B22` `*0.2/14.5038` | tyre pressure bar (raw × 0.2 psi) – TPMS, probably only with ignition on |
+| `tyre_t_fl/fr/rl/rr` | 7A0 | 22C00B | `B8`/`B13`/`B18`/`B23` `-50` | tyre temperature °C |
 
 Sources: [evDash](https://github.com/nickn17/evDash), [WiCAN](https://github.com/meatpiHQ/wican-fw) (`vehicle_profiles/hyundai/ioniq5-6.json`), OVMS.
 
-### XPeng G9 (also G6/P5/P7/X9)
-
-Battery management via header `704`, response from `784`. Init: `ATZ ATE0 ATL0 ATS0 ATH0 ATSP6 ATAT1 ATAL ATCRA784 ATFCSH704 ATFCSD300000 ATFCSM1`.
-**Important:** `ATFCSM1` (user-defined flow control) only works if `ATFCSH` **and** `ATFCSD` are set first. The WiCAN profile (and our profile up to 0.3.10) lacks `ATFCSD300000` – the ELM327 then rejects `ATFCSM1`, sends the flow control to the wrong address (`77C` instead of `704`) and multi-frame responses never complete. Since 0.3.11 stored profiles are repaired automatically.
-The basis is the WiCAN profile `xpeng_g6.json`, corrected according to [XPCarData](https://github.com/stevelea/xpcardata), where the values were verified on a G6:
-
-- **SoH** is at `22110A`. WiCAN lists `22011A`, which is most likely a typo.
-- **Odometer** is 3 bytes, not 2.
-- **Range** comes directly from the battery management (`221118`). Note that this is the **CLTC** value, which is usually 15–20 % above WLTP.
-
-| ID | Command | Formula | Meaning |
-|---|---|---|---|
-| `soc` | 221109 | `u16(B3,B4)/10` | state of charge |
-| `bat_temp_max` / `bat_temp_min` | 221107 / 221108 | `B3-40` | battery temperature °C |
-| `odometer` | 220101 | `B3*65536+B4*256+B5` | odometer |
-| `range_cltc` | 221118 | `u16(B3,B4)` | range (CLTC) |
-| `range_calc` | 221109 | `u16(B3,B4)/10*CAP/CONS` | calculated range |
-| `soh` | 22110A | `u16(B3,B4)/10` | state of health |
-| `charge_limit` | 221130 | `u16(B3,B4)-10` | charge limit % |
-| `charge_status` | 22112D | `B3` (raw value, 0 = not charging) | charging status – on the G9 AC charging returned 1 (XPCarData lists 3 for AC) |
-| `hv_voltage` / `hv_current` | 221101 / 221103 | `u16(B3,B4)/10` / `u16(B3,B4)*0.5-1600` | HV voltage / current (negative = charging) |
-| `charge_power` | 221103 | `max(0,-(u16(B3,B4)*0.5-1600)*hv_voltage/1000)` | charging power in the battery (kW) |
-| `charging` / `charging_dc` | 221103 | current < −2 A / power > 11.5 kW | charging active / DC charging |
-
-`charge_power` and `charging_dc` combine two responses: formulas may use the last value of any other value by its ID (here `hv_voltage`).
-
-**First G9 test (forum member, Vgate iCar 2S Pro):** SoC, temperatures, odometer, both ranges, SoH, HV voltage/current and charge status are plausible (AC charging: 713 V × −10.5 A ≈ 7.5 kW, matching the SoC increase). `charge_limit` is still wrong (raw value 210) and will be fixed once raw data is available.
-
-**Important:** most values come from the G6 and are only partially verified on the G9, not at all on the G9 MY25. Check every value with the Test button against the display in the car. If you get `NO DATA` or a negative response (NRC 0x31), the G9 uses a different address for that value.
-
-### XPeng G6 / P7+
-
-Separate profiles `g6` and `p7plus` with the same values as the G9. For the G6 they are verified by XPCarData. For the P7+ no PIDs have been published, so that profile is **experimental**. Please check every value with "Test". For the calculated range, adjust capacity and consumption to your variant.
-
 ### Range
 
-None of these cars report the dashboard range via OBD – neither evDash nor WiCAN nor OVMS read it. `range_calc` therefore estimates it: SoC × usable capacity ÷ consumption. Under **Profile → Battery & range** you pick your battery variant from a list (known sizes pre-filled, value can be corrected by hand) and enter your average consumption in kWh/100 km. Formulas can use the variables `CAP` (usable kWh) and `CONS` (kWh/100 km). Pre-filled variants (usable capacity): IONIQ 5 58/63/72.6/77.4/84 kWh (≈54/60/70/74/80), G9 MY25 78.2/92.2 kWh, G9 2023/24 98 kWh (≈93), G6 MY25 67.8/80.0 kWh, G6 2024 66/87.5 kWh (≈64/84), P7+ 59.6/74.9 kWh (MY25/26 values from ev-database.org).
+The car does not report the dashboard range via OBD – neither evDash nor WiCAN nor OVMS read it. `range_calc` therefore estimates it: SoC × usable capacity ÷ consumption. Under **Profile → Battery & range** you pick your battery variant from a list (known sizes pre-filled, value can be corrected by hand) and enter your average consumption in kWh/100 km. Formulas can use the variables `CAP` (usable kWh) and `CONS` (kWh/100 km). Pre-filled variants (usable capacity): IONIQ 5 58/63/72.6/77.4/84 kWh (≈54/60/70/74/80).
 
 ### Converting WiCAN profiles
 
@@ -153,9 +121,9 @@ Values flagged `"sleep_zero": true` in the profile JSON (e.g. charging power, ch
 | `obd2mqtt/ble_rssi` | BLE signal strength |
 | `obd2mqtt/last_error` | last error |
 | `obd2mqtt/status` | `online` / `offline` (last will of the bridge) |
-| `obd2mqtt/profile` | name of the active vehicle profile, e.g. `XPeng G9` (retained) |
-| `obd2mqtt/profile/attributes` | details as JSON: `{"id":"g9","name":"XPeng G9","model":"…","active_pids":[…],"firmware":"…"}` |
-| `obd2mqtt/state` | all current values incl. profile as **one** JSON after every poll cycle: `{"profile":"XPeng G9","profile_id":"g9","time":"…","values":{"soc":71.5,…},"voltage_12v":12.6}` |
+| `obd2mqtt/profile` | name of the active vehicle profile, e.g. `Hyundai IONIQ 5 / Kia EV6` (retained) |
+| `obd2mqtt/profile/attributes` | details as JSON: `{"id":"ioniq5","name":"Hyundai IONIQ 5 / Kia EV6","model":"…","active_pids":[…],"firmware":"…"}` |
+| `obd2mqtt/state` | all current values incl. profile as **one** JSON after every poll cycle: `{"profile":"Hyundai IONIQ 5 / Kia EV6","profile_id":"ioniq5","time":"…","values":{"soc":71.5,…},"voltage_12v":12.6}` |
 
 Discovery is published under `homeassistant/sensor/obd2mqtt_xxxxxx/<id>/config`.
 
@@ -183,7 +151,7 @@ src/web.*, web_ui.h     REST API and web interface
 scripts/gen_web_assets.py  gzips web_ui.h / help_ui.h into src/web_assets.h before each build
 src/help_ui.h           built-in manual
 src/config.*            configuration and profiles (LittleFS)
-src/default_profiles.h  factory profiles IONIQ 5, G6, G9, P7+
+src/default_profiles.h  factory profile IONIQ 5 / EV6
 lib/tinyexpr            formula parser (zlib license, codeplea/tinyexpr)
 changelog.json          changelog source → tools/gen_changelog.py → CHANGELOG.en.md + web UI
 ```
@@ -192,13 +160,13 @@ changelog.json          changelog source → tools/gen_changelog.py → CHANGELO
 
 Private hobby project, beta software, use **at your own risk**. No warranty or liability for damage to the vehicle, 12 V battery, dongle or other hardware, to the extent permitted by law. The factory profiles only send diagnostic **read** requests (UDS 0x22 / OBD2 mode 01); the terminal, however, can send arbitrary commands – at your own responsibility. Values without guarantee; the display in the vehicle is always authoritative. A permanently plugged-in dongle draws power; unplug it if the car is parked for a longer time.
 
-Not affiliated with XPeng, Hyundai, Kia, MeatPi or any dongle manufacturer. Brand and product names belong to their respective owners and are used for descriptive purposes only.
+Not affiliated with Hyundai, Kia, MeatPi or any dongle manufacturer. Brand and product names belong to their respective owners and are used for descriptive purposes only.
 
 This firmware was developed with AI assistance.
 
 ## Thanks
 
-[evDash](https://github.com/nickn17/evDash), [WiCAN](https://github.com/meatpiHQ/wican-fw), [XPCarData](https://github.com/stevelea/xpcardata), OVMS, xpeng-wican-evcc and the community on the ABRP feedback board and in the forums.
+[evDash](https://github.com/nickn17/evDash), [WiCAN](https://github.com/meatpiHQ/wican-fw), OVMS and the community on the ABRP feedback board and in the forums.
 
 ## License
 
