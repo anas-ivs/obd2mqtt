@@ -3,27 +3,26 @@
 #include <deque>
 #include <mutex>
 #include <time.h>
-#include "i18n.h"
 
 static std::mutex mtx;
-static std::mutex fmtx;               // serialisiert alle Zugriffe auf die Log-Dateien (loop- und Web-Task)
-static std::deque<String> lines;      // RAM-Ringpuffer
-static std::deque<String> pending;    // noch nicht in die Datei geschrieben
+static std::mutex fmtx;               // serializes all access to the log files (loop and web task)
+static std::deque<String> lines;      // RAM ring buffer
+static std::deque<String> pending;    // not yet written to the file
 static const size_t MAX_LINES = 200;
-static const size_t MAX_FILE = 16 * 1024;     // je Datei; zusammen max. ~32 KB von 128 KB LittleFS
-static const float FS_MAX_USE = 0.70f;          // darüber werden Log-Dateien geopfert, nie Profile/Config
+static const size_t MAX_FILE = 16 * 1024;     // per file; together max. ~32 KB of 128 KB LittleFS
+static const float FS_MAX_USE = 0.70f;          // above this, log files are sacrificed, never profiles/config
 static bool persist = true;
 static const char* LOG_FILE = "/log.txt";
 static const char* LOG_OLD = "/log.old.txt";
 
-// ---------- Uhrzeit ----------
-// Die Zeit gilt erst als gültig, wenn sie plausibel ist (nicht vor dem Firmware-Bau, höchstens 5 Jahre danach)
-// oder von einer zweiten NTP-Antwort bestätigt wurde. Ein fehlerhafter NTP-Server lieferte z. B. 2034.
+// ---------- Time ----------
+// The time only counts as valid once it is plausible (not before the firmware build, at most 5 years after)
+// or has been confirmed by a second NTP response. A faulty NTP server once returned e.g. 2034.
 #include <esp_sntp.h>
 static volatile bool gTimeOk = false;
 static volatile bool gSyncEvent = false;
 static time_t gBuild = 0;
-static time_t gCand = 0;          // unplausible Zeit, wartet auf Bestätigung
+static time_t gCand = 0;          // implausible time, awaiting confirmation
 static uint32_t gCandMs = 0, gLastRestart = 0;
 
 static time_t buildEpoch() {
@@ -46,7 +45,7 @@ static void onSync(struct timeval*) { gSyncEvent = true; }
 void timeInit(const char* tz) {
   gBuild = buildEpoch();
   setenv("TZ", tz, 1); tzset();
-  gTimeOk = plausible(time(nullptr));   // nach Software-Neustart läuft die Uhr weiter
+  gTimeOk = plausible(time(nullptr));   // the clock keeps running after a software restart
   sntp_set_time_sync_notification_cb(onSync);
 }
 
@@ -58,7 +57,7 @@ static String fmtTime(time_t t) {
 
 void timeLoop(const char* server) {
   if (!gSyncEvent) {
-    // Unplausible Zeit gesetzt und noch keine Bestätigung: jede Minute neu anfragen
+    // Implausible time set and not yet confirmed: re-request every minute
     if (!gTimeOk && gCand && millis() - gLastRestart > 60000) { gLastRestart = millis(); sntp_restart(); }
     return;
   }
@@ -69,17 +68,17 @@ void timeLoop(const char* server) {
     gTimeOk = true;
     gCand = 0;
   } else if (gCand && labs((long)((t - gCand) - (time_t)((millis() - gCandMs) / 1000))) < 300) {
-    gTimeOk = true;   // zweite Antwort bestätigt die (ungewöhnliche) Zeit
+    gTimeOk = true;   // second response confirms the (unusual) time
     gCand = 0;
   } else {
     gTimeOk = false;
     gCand = t; gCandMs = millis(); gLastRestart = millis();
-    logf("NTP: %s %s – %s", T("unplausible Uhrzeit", "implausible time"), fmtTime(t).c_str(),
-         T("verworfen, frage erneut", "discarded, asking again"));
+    logf("NTP: %s %s – %s", "implausible time", fmtTime(t).c_str(),
+         "discarded, asking again");
     sntp_restart();
     return;
   }
-  if (!was && gTimeOk) logf(T("Uhrzeit per NTP synchronisiert (%s)", "Time synchronized via NTP (%s)"), server);
+  if (!was && gTimeOk) logf("Time synchronized via NTP (%s)", server);
 }
 
 bool timeValid() { return gTimeOk; }
@@ -90,7 +89,7 @@ static void stamp(char* ts, size_t n) {
     struct tm t;
     localtime_r(&now, &t);
     strftime(ts, n, "%Y-%m-%d %H:%M:%S ", &t);
-  } else {   // vor der NTP-Synchronisation: Laufzeit seit Start
+  } else {   // before NTP sync: uptime since boot
     uint32_t s = millis() / 1000;
     snprintf(ts, n, "+%02lu:%02lu:%02lu ", (unsigned long)(s / 3600) % 100,
              (unsigned long)(s / 60) % 60, (unsigned long)s % 60);
@@ -137,7 +136,7 @@ void logSetPersist(bool on) {
 }
 bool logPersist() { return persist; }
 
-// Platz schaffen: zuerst das alte Log, notfalls auch das aktuelle löschen
+// Free up space: delete the old log first, the current one too if necessary
 static void ensureSpace(size_t need) {
   size_t total = LittleFS.totalBytes();
   if (!total) return;
@@ -158,13 +157,13 @@ void logFlush() {
   std::lock_guard<std::mutex> fl(fmtx);
   ensureSpace(need);
   if (LittleFS.totalBytes() && LittleFS.usedBytes() + need + 8192 > (size_t)(LittleFS.totalBytes() * FS_MAX_USE))
-    return;   // trotzdem zu voll (Profile sehr groß) → lieber nichts schreiben als abstürzen
+    return;   // still too full (very large profiles) → better to write nothing than to crash
   File f = LittleFS.open(LOG_FILE, "a");
   if (!f) return;
   for (auto& l : todo) { f.print(l); f.print('\n'); }
   size_t sz = f.size();
   f.close();
-  if (sz > MAX_FILE) {   // rotieren: aktuelle Datei wird zur alten
+  if (sz > MAX_FILE) {   // rotate: current file becomes the old one
     LittleFS.remove(LOG_OLD);
     LittleFS.rename(LOG_FILE, LOG_OLD);
   }
@@ -177,7 +176,7 @@ bool logReadFile(bool old, String& out) {
   File f = LittleFS.open(path, "r");
   if (!f) return false;
   size_t sz = f.size();
-  if (sz > MAX_FILE + 4096) { f.seek(sz - (MAX_FILE + 4096)); sz = MAX_FILE + 4096; }   // Altlasten > 16 KB: nur das Ende
+  if (sz > MAX_FILE + 4096) { f.seek(sz - (MAX_FILE + 4096)); sz = MAX_FILE + 4096; }   // legacy files > 16 KB: only the tail
   out.reserve(sz + 1);
   uint8_t buf[512];
   while (f.available()) {
@@ -210,11 +209,11 @@ void logBootCheck(uint32_t crashes) {
   std::lock_guard<std::mutex> fl(fmtx);
   size_t total = LittleFS.totalBytes(), used = LittleFS.usedBytes();
   bool full = total && used > (size_t)(total * FS_MAX_USE);
-  // Absturzschleife oder volles Dateisystem: Log-Dateien sind der wahrscheinlichste Auslöser → weg damit
+  // Crash loop or full file system: log files are the most likely cause → remove them
   if (crashes >= 2 || full) LittleFS.remove(LOG_OLD);
   if (crashes >= 3 || (full && LittleFS.usedBytes() > (size_t)(total * FS_MAX_USE))) LittleFS.remove(LOG_FILE);
   {
-    // Altlast aus Versionen ≤ 0.3.5 (48 KB je Datei) kürzen
+    // Trim legacy files from versions ≤ 0.3.5 (48 KB per file)
     for (const char* p : {LOG_OLD, LOG_FILE}) {
       if (!LittleFS.exists(p)) continue;
       File f = LittleFS.open(p, "r");

@@ -1,23 +1,23 @@
 #pragma once
 #include <Arduino.h>
 
-// Watchdog & sicherer Modus
-//  - Hardware-Task-Watchdog: hängt die Hauptschleife > 60 s → automatischer Neustart
-//  - Verbindungs-Watchdog: WLAN bzw. MQTT länger als X min weg → Neustart
-//  - Sicherer Modus: nach 3 Abstürzen/Watchdog-Resets in Folge startet die Firmware
-//    ohne Bluetooth/Abfragen, damit die Weboberfläche erreichbar bleibt
+// Watchdog & safe mode
+//  - Hardware task watchdog: main loop hangs > 60 s → automatic restart
+//  - Connection watchdog: WiFi or MQTT down for more than X min → restart
+//  - Safe mode: after 3 consecutive crashes/watchdog resets the firmware starts
+//    without Bluetooth/polling so the web UI stays reachable
 namespace Watchdog {
-void begin();                       // früh in setup() aufrufen
-void armTaskWdt();                  // am Ende von setup()
-void feed();                        // in langen Warteschleifen aufrufen
+void begin();                       // call early in setup()
+void armTaskWdt();                  // at the end of setup()
+void feed();                        // call in long wait loops
 void loop(bool wifiUp, bool mqttConfigured, bool mqttUp, bool apClients);
 bool safeMode();
 uint32_t crashCount();
-const char* resetReason();          // Grund des letzten Neustarts (Klartext)
-void restart(const char* why);      // geplanter Neustart mit Begründung
-void clearCrashCounter();           // z.B. bei manuellem Neustart
-// Merkt sich (überlebt den Neustart), was die Firmware gerade tut. Hängt sie, steht nach dem
-// Watchdog-Neustart im Log, wobei („Hing bei: BLE subscribe/pairing“). nullptr = nichts Besonderes.
+const char* resetReason();          // reason for the last restart (plain text)
+void restart(const char* why);      // planned restart with reason
+void clearCrashCounter();           // e.g. on manual restart
+// Remembers (survives the restart) what the firmware is currently doing. If it hangs, the log after the
+// watchdog restart shows where ("Firmware hung at: BLE subscribe/pairing"). nullptr = nothing special.
 void step(const char* what);
-const char* hangStep();             // Schritt, bei dem die Firmware vor dem letzten Absturz hing ("" = unbekannt)
+const char* hangStep();             // step the firmware was stuck at before the last crash ("" = unknown)
 }

@@ -3,29 +3,29 @@
 #include <ArduinoJson.h>
 #include <mutex>
 
-// Abfrage-Logik: BLE verbinden, Init, PIDs zyklisch abfragen, Werte publizieren.
-// Läuft ausschließlich im Arduino-loop()-Task; die Web-UI kommuniziert über Jobs/Flags.
+// Polling logic: connect BLE, init, poll PIDs cyclically, publish values.
+// Runs exclusively in the Arduino loop() task; the web UI communicates via jobs/flags.
 namespace Poller {
 
-std::mutex& mutex();          // schützt cfg/profile/Status zwischen Web- und Loop-Task
+std::mutex& mutex();          // protects cfg/profile/status between web and loop task
 
-void begin(bool bleEnabled = true);   // false = sicherer Modus (keine BLE-Abfragen)
+void begin(bool bleEnabled = true);   // false = safe mode (no BLE polling)
 void loop();
 
-// Aufrufe aus dem Web-Task
-void requestConfigApply(const String& json);  // übernimmt + speichert Konfiguration
-void requestProfileReload();                  // aktives Profil neu laden
+// Calls from the web task
+void requestConfigApply(const String& json);  // applies + saves configuration
+void requestProfileReload();                  // reload active profile
 void requestPollNow();
-String lastErrorText();                       // aktueller „Letzter Fehler“ (leer = keiner)
-void requestEnabled(bool on);                 // Hauptschalter (Web/MQTT) – wird im loop() gespeichert
-void setPaused(bool p);                       // z.B. während OTA
+String lastErrorText();                       // current "last error" (empty = none)
+void requestEnabled(bool on);                 // main switch (web/MQTT) – saved in loop()
+void setPaused(bool p);                       // e.g. during OTA
 bool isPaused();
 
 enum JobType { JOB_RAW, JOB_TEST, JOB_SCAN, JOB_DIAG };
 void setDebug(uint32_t minutes);
-size_t diagChunk(size_t offset, uint8_t* buf, size_t maxLen);   // letzter Diagnose-Bericht (Text)              // Diagnose-Log für N Minuten (0 = aus)
+size_t diagChunk(size_t offset, uint8_t* buf, size_t maxLen);   // last diagnostic report (text)              // diagnostic log for N minutes (0 = off)
 bool submitJob(JobType t, const String& header, const String& cmd, const String& formula,
-               float cap = 0, float cons = 0);   // cap/cons: Akku-Werte für den Test (0 = aktives Profil)
+               float cap = 0, float cons = 0);   // cap/cons: battery values for the test (0 = active profile)
 void jobJson(JsonDocument& d);                // {state: idle|pending|running|done, result: {...}}
 
 void statusJson(JsonDocument& d);

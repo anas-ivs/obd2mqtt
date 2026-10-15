@@ -1,7 +1,6 @@
 # OBD2MQTT – BLE-OBD2 → MQTT → Home Assistant
 
 > **Beta.** Tested on a Hyundai IONIQ 5. The XPeng profiles (G6, G9, P7+) are still **untested** – feedback is very welcome (GitHub issue or forum).
-> 🇩🇪 *Deutsche Version: [README.de.md](README.de.md)*
 
 **[⬇ Download: latest firmware (Releases)](../../releases/latest)** · [Manual](docs/manual_en.html) · [Changelog](CHANGELOG.en.md)
 
@@ -17,7 +16,7 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 
 - BLE client for ELM327 dongles (auto-detects common UUIDs: FFF0, FFE0, 18F0, vLinker; can be overridden manually)
 - Vehicle profiles as JSON (pre-installed: Hyundai IONIQ 5 / Kia EV6, XPeng G6, G9 and P7+), editable in the web UI
-- Web interface and built-in manual in English and German, backup/restore of all settings, log with real time (NTP)
+- Web interface and built-in manual (English), backup/restore of all settings, log with real time (NTP)
 - PIDs with freely definable formulas (`B34/2`, `u16(B28,B29)/10`, `s16(..)`, `s8(..)`, `bit(x,n)`)
 - **Test button** per PID: shows every response byte with its index so you can easily find byte positions
 - ELM327 terminal in the browser
@@ -51,7 +50,7 @@ Later updates: web UI → System → Firmware update with `obd2mqtt-vX.Y.Z-esp32
 
 ## First setup
 
-1. After the first boot the ESP32 opens the WiFi network **`OBD2MQTT-xxxx`** (password `obd2mqtt`). Connect and open http://192.168.4.1. Switch the language to English at the top right.
+1. After the first boot the ESP32 opens the WiFi network **`OBD2MQTT-xxxx`** (password `obd2mqtt`). Connect and open http://192.168.4.1.
 2. **Settings → WiFi**: enter SSID and password, then **MQTT**: broker, user and password.
 3. **BLE dongle**: park the car with the dongle plugged in nearby, then click "Scan for dongles". Entries marked with ★ are most likely OBD adapters. Click the entry.
 4. "Save & restart". Afterwards the interface is available at `http://obd2mqtt.local` or the assigned IP address.
@@ -181,11 +180,11 @@ src/obd_parse.*         response parser (single/multi-frame) and formula evaluat
 src/poller.*            poll scheduler, 12 V protection, jobs from the web UI
 src/mqtt_ha.*           MQTT and Home Assistant discovery
 src/web.*, web_ui.h     REST API and web interface
-src/help_ui.h           built-in manual (DE/EN)
+src/help_ui.h           built-in manual
 src/config.*            configuration and profiles (LittleFS)
 src/default_profiles.h  factory profiles IONIQ 5, G6, G9, P7+
 lib/tinyexpr            formula parser (zlib license, codeplea/tinyexpr)
-changelog.json          changelog source → tools/gen_changelog.py → CHANGELOG*.md + web UI
+changelog.json          changelog source → tools/gen_changelog.py → CHANGELOG.en.md + web UI
 ```
 
 ## Disclaimer

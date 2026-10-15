@@ -4,81 +4,80 @@
 #include <vector>
 
 
-// ---------- Geräte-Konfiguration (/config.json) ----------
+// ---------- Device configuration (/config.json) ----------
 struct AppConfig {
-  // Netzwerk
+  // Network
   String wifiSsid, wifiPass;
   String hostname = "obd2mqtt";
-  String webPass;                       // leer = keine Anmeldung (User: admin)
-  String ipMode = "dhcp";               // dhcp | static (bei Fehler Fallback auf DHCP)
+  String webPass;                       // empty = no login (user: admin)
+  String ipMode = "dhcp";               // dhcp | static (falls back to DHCP on failure)
   String ipAddr, ipGw, ipMask = "255.255.255.0", ipDns1, ipDns2;
 
   // MQTT
   String mqttHost;
   uint16_t mqttPort = 1883;
   String mqttUser, mqttPass;
-  String mqttBase = "obd2mqtt";         // State-Topics: <base>/<pid>
-  String haPrefix = "homeassistant";    // Discovery-Prefix
-  String deviceName = "Auto OBD";       // Gerätename in Home Assistant
+  String mqttBase = "obd2mqtt";         // State topics: <base>/<pid>
+  String haPrefix = "homeassistant";    // Discovery prefix
+  String deviceName = "Auto OBD";       // Device name in Home Assistant
 
-  // BLE-Dongle
+  // BLE dongle
   String bleMac;                        // AA:BB:CC:DD:EE:FF
   String bleAddrType = "auto";          // auto | public | random
-  String bleService, bleNotify, bleWrite; // leer = automatisch erkennen
-  String bleName;                       // Anzeigename (aus Scan bzw. Dongle)
-  String blePin;                        // BLE-Passkey für Dongles mit Kopplung (z. B. WiCAN Pro: 123456), leer = keiner
+  String bleService, bleNotify, bleWrite; // empty = auto-detect
+  String bleName;                       // Display name (from scan or dongle)
+  String blePin;                        // BLE passkey for dongles that require pairing (e.g. WiCAN Pro: 123456), empty = none
 
-  // Abfrage
-  String profile = "ioniq5";            // Datei /profiles/<name>.json
-  bool pollEnabled = true;              // Hauptschalter: automatische Abfrage ein/aus
-  float minVoltage = 12.2f;             // 12V-Schutz, 0 = aus
-  float sleepVoltage = 13.2f;           // darunter gilt das Auto als schlafend → keine CAN-Abfragen (0 = aus)
-  uint32_t sleepPollMin = 0;
-  float lowBattVoltage = 12.0f;         // 12V-Warnung (HA-Sensor „12V niedrig“), 0 = aus            // trotzdem abfragen, während das Auto schläft: alle N min (0 = nie)
-  uint32_t retrySec = 60;               // Pause nach fehlgeschlagener BLE-Verbindung
+  // Polling
+  String profile = "ioniq5";            // File /profiles/<name>.json
+  bool pollEnabled = true;              // Master switch: automatic polling on/off
+  float minVoltage = 12.2f;             // 12V protection, 0 = off
+  float sleepVoltage = 13.2f;           // below this the car is considered asleep → no CAN queries (0 = off)
+  uint32_t sleepPollMin = 0;            // poll anyway while the car sleeps: every N min (0 = never)
+  float lowBattVoltage = 12.0f;         // 12V warning (HA sensor "12V low"), 0 = off
+  uint32_t retrySec = 60;               // Pause after a failed BLE connection
   uint32_t cmdTimeoutMs = 3000;
-  bool keepConnected = false;           // BLE zwischen den Abfragen halten
-  uint32_t backoffSec = 600;            // Pause, wenn das Auto nicht antwortet (0 = aus)
+  bool keepConnected = false;           // Keep BLE connected between polls
+  uint32_t backoffSec = 600;            // Pause when the car does not respond (0 = off)
 
-  // Zeit & Log
+  // Time & log
   String ntpServer = "pool.ntp.org";
-  String tz = "CET-1CEST,M3.5.0,M10.5.0/3";  // POSIX-Zeitzone (Deutschland)
-  bool updateCheck = true;              // täglich auf GitHub nach neuer Firmware sehen
-  bool logPersist = true;               // Log im Flash speichern (übersteht Neustarts)
-  String lang = "de";                   // Sprache: de | en
+  String tz = "MYT-8";                  // POSIX time zone (Malaysia, UTC+8)
+  bool updateCheck = true;              // check GitHub daily for new firmware
+  bool logPersist = true;               // store log in flash (survives reboots)
 };
 
-// ---------- Fahrzeug-Profil (/profiles/<name>.json) ----------
+// ---------- Vehicle profile (/profiles/<name>.json) ----------
 struct PidDef {
   String id, name, header, cmd, formula;
   String unit, deviceClass, stateClass = "measurement", icon;
-  uint32_t interval = 120;              // Sekunden
-  float minVal = NAN, maxVal = NAN;     // Plausibilitätsfilter
+  uint32_t interval = 120;              // seconds
+  float minVal = NAN, maxVal = NAN;     // plausibility filter
   int precision = 1;
   bool enabled = true;
-  bool sleepZero = false;               // beim Einschlafen des Autos auf 0 setzen (z. B. Ladeleistung)
+  bool sleepZero = false;               // set to 0 when the car goes to sleep (e.g. charging power)
 };
 
 struct BatteryOption { String name; float kwh; };
 struct Profile {
   String name, model;
-  float batteryKwh = 0;                 // nutzbare Kapazität (kWh) → Formel-Variable CAP
-  float consumption = 0;                // Verbrauch (kWh/100 km) → Formel-Variable CONS
-  std::vector<BatteryOption> batteryOptions;   // Auswahlliste in der Oberfläche
+  float batteryKwh = 0;                 // usable capacity (kWh) → formula variable CAP
+  float consumption = 0;                // consumption (kWh/100 km) → formula variable CONS
+  std::vector<BatteryOption> batteryOptions;   // selection list in the UI
   std::vector<String> init;
   std::vector<PidDef> pids;
 };
 
 extern AppConfig cfg;
-extern bool g_ipFallback;          // feste IP fehlgeschlagen → DHCP aktiv (main.cpp)
+extern bool g_ipFallback;          // static IP failed → DHCP active (main.cpp)
 extern Profile profile;
 
 bool fsBegin();
 bool loadConfig();
 bool saveConfig();
-void migrateProfiles();              // gespeicherte Profile reparieren (z. B. fehlendes ATFCSD)
+void migrateProfiles();              // repair stored profiles (e.g. missing ATFCSD)
 void configToJson(JsonDocument& doc, bool maskSecrets);
-void configFromJson(JsonVariantConst src);   // "********" = Wert unverändert lassen
+void configFromJson(JsonVariantConst src);   // "********" = leave value unchanged
 
 bool loadProfile(const String& name);
 bool parseProfile(JsonVariantConst src, Profile& out, String& err);

@@ -4,7 +4,6 @@
 #include <ArduinoJson.h>
 #include "config.h"
 #include "log.h"
-#include "i18n.h"
 #include "poller.h"
 #include "online_update.h"
 
@@ -14,7 +13,7 @@ static WiFiClient net;
 static PubSubClient mqtt(net);
 static uint32_t lastTry = 0;
 static bool discoveryPending = true;
-static std::vector<String> announced;   // bereits per Discovery angelegte Sensor-IDs
+static std::vector<String> announced;   // sensor IDs already created via discovery
 
 String deviceId() {
   uint8_t m[6];
@@ -46,10 +45,10 @@ static void publishConfig(const String& component, const String& objId, JsonDocu
     addDevice(d);
     serializeJson(d, payload);
   }
-  mqtt.publish(t.c_str(), payload.c_str(), true);   // leerer Payload = Entität entfernen
+  mqtt.publish(t.c_str(), payload.c_str(), true);   // empty payload = remove entity
 }
 
-// <base>/profile = Anzeigename, <base>/profile/attributes = Details (JSON)
+// <base>/profile = display name, <base>/profile/attributes = details (JSON)
 void publishProfile() {
   if (!mqtt.connected()) return;
   mqtt.publish(topic("profile").c_str(), (profile.name.length() ? profile.name : cfg.profile).c_str(), true);
@@ -83,7 +82,7 @@ static void sendDiscovery() {
     }
     publishConfig("sensor", p.id, d);
   }
-  // Entfernte PIDs aus HA löschen
+  // Delete removed PIDs from HA
   for (auto& old : announced) {
     bool still = false;
     for (auto& n : now) if (n == old) still = true;
@@ -93,9 +92,9 @@ static void sendDiscovery() {
   }
   announced = now;
 
-  { // 12V-Bordnetz (vom Dongle gemessen)
+  { // 12V system (measured by the dongle)
     JsonDocument d;
-    d["name"] = T("12V Bordnetz", "12V battery");
+    d["name"] = "12V battery";
     d["state_topic"] = topic("voltage_12v");
     d["unit_of_measurement"] = "V";
     d["device_class"] = "voltage";
@@ -103,32 +102,32 @@ static void sendDiscovery() {
     d["suggested_display_precision"] = 1;
     publishConfig("sensor", "voltage_12v", d);
   }
-  { // Dongle erreichbar
+  { // Dongle reachable
     JsonDocument d;
-    d["name"] = T("OBD-Dongle verbunden", "OBD dongle connected");
+    d["name"] = "OBD dongle connected";
     d["state_topic"] = topic("car");
     d["payload_on"] = "online";
     d["payload_off"] = "offline";
     d["device_class"] = "connectivity";
     publishConfig("binary_sensor", "car", d);
   }
-  if (cfg.sleepVoltage > 0) { // Auto wach (12V über Schwelle = DC/DC-Wandler aktiv)
+  if (cfg.sleepVoltage > 0) { // Car awake (12V above threshold = DC/DC converter active)
     JsonDocument d;
-    d["name"] = T("Auto wach", "Car awake");
+    d["name"] = "Car awake";
     d["state_topic"] = topic("car_awake");
     d["icon"] = "mdi:car-electric";
     publishConfig("binary_sensor", "car_awake", d);
   } else { JsonDocument empty; publishConfig("binary_sensor", "car_awake", empty); }
-  if (cfg.lowBattVoltage > 0) { // 12V-Warnung
+  if (cfg.lowBattVoltage > 0) { // 12V warning
     JsonDocument d;
-    d["name"] = T("12V niedrig", "12V low");
+    d["name"] = "12V low";
     d["state_topic"] = topic("battery_low");
-    d["device_class"] = "battery";   // ON = niedrig
+    d["device_class"] = "battery";   // ON = low
     publishConfig("binary_sensor", "battery_low", d);
   } else { JsonDocument empty; publishConfig("binary_sensor", "battery_low", empty); }
-  { // Hauptschalter Abfrage
+  { // Polling master switch
     JsonDocument d;
-    d["name"] = T("Abfrage", "Polling");
+    d["name"] = "Polling";
     d["state_topic"] = topic("polling");
     d["command_topic"] = topic("polling/set");
     d["payload_on"] = "ON";
@@ -138,7 +137,7 @@ static void sendDiscovery() {
     publishConfig("switch", "polling", d);
   }
   mqtt.publish(topic("polling").c_str(), cfg.pollEnabled ? "ON" : "OFF", true);
-  { // BLE-Signal
+  { // BLE signal
     JsonDocument d;
     d["name"] = "BLE Signal";
     d["state_topic"] = topic("ble_rssi");
@@ -147,28 +146,28 @@ static void sendDiscovery() {
     d["entity_category"] = "diagnostic";
     publishConfig("sensor", "ble_rssi", d);
   }
-  { // Letzter Fehler – aktuellen Stand sofort veröffentlichen (überschreibt alten retained Wert)
+  { // Last error – publish current state immediately (overwrites old retained value)
     String le = Poller::lastErrorText();
-    mqtt.publish(topic("last_error").c_str(), le.length() ? le.c_str() : T("keiner", "none"), true);
+    mqtt.publish(topic("last_error").c_str(), le.length() ? le.c_str() : "none", true);
   }
-  { // Letzter Fehler
+  { // Last error
     JsonDocument d;
-    d["name"] = T("Letzter Fehler", "Last error");
+    d["name"] = "Last error";
     d["state_topic"] = topic("last_error");
     d["entity_category"] = "diagnostic";
     d["icon"] = "mdi:alert-circle-outline";
     publishConfig("sensor", "last_error", d);
   }
-  { // Aktives Fahrzeugprofil (Name als Wert, Details als Attribute)
+  { // Active vehicle profile (name as value, details as attributes)
     JsonDocument d;
-    d["name"] = T("Fahrzeugprofil", "Vehicle profile");
+    d["name"] = "Vehicle profile";
     d["state_topic"] = topic("profile");
     d["json_attributes_topic"] = topic("profile/attributes");
     d["entity_category"] = "diagnostic";
     d["icon"] = "mdi:car-info";
     publishConfig("sensor", "profile", d);
   }
-  { // Firmware-Update (HA „update“-Entität: zeigt neue Version, Installieren startet das Online-Update)
+  { // Firmware update (HA "update" entity: shows new version, Install starts the online update)
     JsonDocument d;
     d["name"] = "Firmware";
     d["state_topic"] = topic("update");
@@ -180,7 +179,7 @@ static void sendDiscovery() {
   }
   OnlineUpdate::publishMqtt();
   publishProfile();
-  logf(T("MQTT Discovery gesendet (%u PIDs aktiv)", "MQTT discovery sent (%u PIDs active)"), (unsigned)now.size());
+  logf("MQTT discovery sent (%u PIDs active)", (unsigned)now.size());
 }
 
 static void onMessage(char* t, byte* payload, unsigned int len) {
@@ -190,8 +189,8 @@ static void onMessage(char* t, byte* payload, unsigned int len) {
   v.toUpperCase();
   if (tp == topic("update/install")) {
     if (v == "INSTALL") {
-      if (OnlineUpdate::requestInstall()) logf("%s", T("Online-Update über Home Assistant angestoßen", "Online update triggered via Home Assistant"));
-      else logf("%s", T("Home Assistant: Installieren ignoriert – keine neuere Version bekannt", "Home Assistant: install ignored – no newer version known"));
+      if (OnlineUpdate::requestInstall()) logf("%s", "Online update triggered via Home Assistant");
+      else logf("%s", "Home Assistant: install ignored – no newer version known");
     }
     return;
   }
@@ -221,8 +220,8 @@ void loop() {
                            cfg.mqttUser.length() ? cfg.mqttUser.c_str() : nullptr,
                            cfg.mqttPass.length() ? cfg.mqttPass.c_str() : nullptr,
                            will.c_str(), 1, true, "offline");
-    if (!ok) { logf(T("MQTT-Verbindung fehlgeschlagen (rc=%d)", "MQTT connection failed (rc=%d)"), mqtt.state()); return; }
-    logf(T("MQTT verbunden mit %s:%u", "MQTT connected to %s:%u"), cfg.mqttHost.c_str(), cfg.mqttPort);
+    if (!ok) { logf("MQTT connection failed (rc=%d)", mqtt.state()); return; }
+    logf("MQTT connected to %s:%u", cfg.mqttHost.c_str(), cfg.mqttPort);
     mqtt.publish(will.c_str(), "online", true);
     mqtt.subscribe(topic("polling/set").c_str());
     mqtt.subscribe(topic("update/install").c_str());

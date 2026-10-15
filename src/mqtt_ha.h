@@ -3,10 +3,10 @@
 
 namespace MqttHa {
 void begin();
-void loop();                       // Verbindung halten, Discovery nach (Re)Connect
+void loop();                       // maintain connection, discovery after (re)connect
 bool connected();
 String deviceId();
-void requestDiscovery();           // z.B. nach Profiländerung
+void requestDiscovery();           // e.g. after a profile change
 void publishValue(const String& id, double v, int precision);
 void publishText(const String& sub, const String& v, bool retain = true);
 void publishProfile();             // <base>/profile + <base>/profile/attributes

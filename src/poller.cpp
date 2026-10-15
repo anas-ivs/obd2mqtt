@@ -9,7 +9,6 @@
 #include "log.h"
 #include "mqtt_ha.h"
 #include "obd_parse.h"
-#include "i18n.h"
 
 namespace Poller {
 
@@ -18,33 +17,33 @@ std::mutex& mutex() { return mtx; }
 
 struct PidState {
   double value = NAN;
-  uint32_t lastOk = 0;      // millis() des letzten gültigen Werts
-  uint32_t lastPoll = 0;    // millis() des letzten Versuchs (0 = nie)
+  uint32_t lastOk = 0;      // millis() of the last valid value
+  uint32_t lastPoll = 0;    // millis() of the last attempt (0 = never)
   String err, raw;
 };
 static std::vector<PidState> states;
 
 static String currentHeader;
 static uint32_t nextConnectTry = 0;
-static bool elmReady = false;         // Init-Sequenz ausgeführt
+static bool elmReady = false;         // init sequence done
 static float lastVoltage = NAN;
-static bool carAsleep = false;          // 12V unter sleepVoltage → Auto schläft, kein CAN-Verkehr
+static bool carAsleep = false;          // 12V below sleepVoltage → car asleep, no CAN traffic
 static uint32_t lastSleepPoll = 0;
-static bool forcePoll = false;          // "Jetzt abfragen" übergeht den Schlafmodus einmal
-static ObdParse::ErrKind lastQueryKind = ObdParse::ERR_NONE;   // Fehlerart der letzten query()
+static bool forcePoll = false;          // "Poll now" bypasses sleep mode once
+static ObdParse::ErrKind lastQueryKind = ObdParse::ERR_NONE;   // error kind of the last query()
 static String lastError;
 static uint32_t lastConnectOk = 0;
-static bool needWarmup = false;          // nach Verbinden/Init: einmal 3E00 vor der ersten langen Abfrage
-static bool unreachLogged = false;       // „Dongle schläft mit dem Auto“ nur einmal loggen
+static bool needWarmup = false;          // after connect/init: send 3E00 once before the first long query
+static bool unreachLogged = false;       // log "dongle sleeps with the car" only once
 static uint32_t pollCycles = 0;
 static String elmVersion, cacheName, cacheKind, cacheUuids;
-static bool cacheBle = false, cacheMqtt = false;   // für den Web-Task (keine BLE-Aufrufe dort)
+static bool cacheBle = false, cacheMqtt = false;   // for the web task (no BLE calls there)
 static int cacheRssi = 0;
 
-// Flags aus dem Web-Task
+// Flags from the web task
 static volatile bool flagProfileReload = false;
 static volatile bool flagPollNow = false;
-static String pendingConfig;          // unter mtx
+static String pendingConfig;          // under mtx
 
 // Job
 struct Job {
@@ -56,12 +55,12 @@ struct Job {
   String progress;
 };
 static Job job;
-static uint32_t lastJobMs = 0;      // nach Test/Terminal Verbindung noch 60 s halten
+static uint32_t lastJobMs = 0;      // keep connection for another 60 s after test/terminal
 
 // ---------------------------------------------------------------
 
 static void setError(const String& e) {
-  logf(T("Fehler: %s", "Error: %s"), e.c_str());
+  logf("Error: %s", e.c_str());
   {
     std::lock_guard<std::mutex> lk(mtx);
     lastError = e;
@@ -82,10 +81,10 @@ static void reloadProfile() {
     ok = loadProfile(cfg.profile);
     if (!ok) profile = old;
   }
-  if (!ok) setError(String(T("Profil '", "Profile '")) + cfg.profile + T("' konnte nicht geladen werden", "' could not be loaded"));
-  else logf(T("Profil '%s' geladen (%u PIDs)", "Profile '%s' loaded (%u PIDs)"), cfg.profile.c_str(), (unsigned)profile.pids.size());
+  if (!ok) setError(String("Profile '") + cfg.profile + "' could not be loaded");
+  else logf("Profile '%s' loaded (%u PIDs)", cfg.profile.c_str(), (unsigned)profile.pids.size());
   resetStates();
-  elmReady = false;           // Init-Befehle könnten sich geändert haben
+  elmReady = false;           // init commands may have changed
   MqttHa::requestDiscovery();
 }
 
@@ -95,13 +94,13 @@ static bool elmCmd(const String& c, String& resp, uint32_t timeout = 0) {
   return ok;
 }
 
-// ---------- Diagnose ----------
+// ---------- Diagnostics ----------
 static volatile uint32_t debugUntil = 0;
 static bool debugOn() { return debugUntil && (int32_t)(millis() - debugUntil) < 0; }
 void setDebug(uint32_t minutes) {
   debugUntil = minutes ? millis() + minutes * 60000UL : 0;
-  if (minutes) logf(T("Diagnose-Log an (%lu min)", "Diagnostic log on (%lu min)"), (unsigned long)minutes);
-  else logf("%s", T("Diagnose-Log aus", "Diagnostic log off"));
+  if (minutes) logf("Diagnostic log on (%lu min)", (unsigned long)minutes);
+  else logf("%s", "Diagnostic log off");
 }
 static String oneLine(const String& s, size_t maxLen = 300) {
   String r = s;
@@ -122,23 +121,23 @@ static bool ensureReady(String& err) {
   }
   if (!elmReady) {
     String r;
-    // Im Schlafmodus wird jede Minute nur zum Spannungslesen verbunden → dann keine [diag]-Zeilen
+    // In sleep mode we connect every minute only to read the voltage → no [diag] lines then
     bool dbg = debugOn() && !ElmBle::quiet;
     Watchdog::step("ELM init");
     for (auto& c : profile.init) {
       bool ok = elmCmd(c, r, c.startsWith("ATZ") || c.startsWith("AT Z") ? 4000 : 0);
-      if (!ElmBle::connected()) {   // Verbindung weg → Init sofort abbrechen statt jede Zeile „ohne Prompt“
-        err = String(T("Verbindung während der Initialisierung abgerissen (bei ", "Connection dropped during initialisation (at ")) + c + ")";
+      if (!ElmBle::connected()) {   // connection lost → abort init immediately instead of "no prompt" on every line
+        err = String("Connection dropped during initialisation (at ") + c + ")";
         return false;
       }
-      if (!ok) logf(T("Init '%s' ohne Prompt (Antwort: %s)", "Init '%s' without prompt (response: %s)"), c.c_str(), oneLine(r).c_str());
-      else if (rejected(r)) logf(T("Init '%s' vom Dongle abgelehnt (Antwort: %s)", "Init '%s' rejected by the dongle (response: %s)"), c.c_str(), oneLine(r).c_str());
+      if (!ok) logf("Init '%s' without prompt (response: %s)", c.c_str(), oneLine(r).c_str());
+      else if (rejected(r)) logf("Init '%s' rejected by the dongle (response: %s)", c.c_str(), oneLine(r).c_str());
       else if (dbg) logf("[diag] %s → %s", c.c_str(), oneLine(r, 60).c_str());
       if (c.startsWith("ATZ")) delay(300);
     }
     currentHeader = "";
-    // Aufwärmen: viele ELM-Clones liefern direkt nach dem Reset beim ersten
-    // CAN-Telegramm "CAN ERROR" bzw. abgeschnittene Antworten.
+    // Warm-up: many ELM clones return "CAN ERROR" or truncated responses
+    // on the first CAN message right after reset.
     delay(300);
     elmCmd("ATRV", r);
     if (dbg) {
@@ -146,12 +145,12 @@ static bool ensureReady(String& err) {
       elmCmd("ATDPN", dp);
       logf("[diag] ATRV → %s, ATDPN → %s, MTU %u", oneLine(r, 20).c_str(), oneLine(dp, 20).c_str(), (unsigned)ElmBle::mtu());
     }
-    if (elmCmd("ATI", r) && r.length() && r.length() < 40) {   // z.B. "ELM327 v1.5"
+    if (elmCmd("ATI", r) && r.length() && r.length() < 40) {   // e.g. "ELM327 v1.5"
       r.replace("\r", " "); r.trim();
       std::lock_guard<std::mutex> lk(mtx);
       elmVersion = r;
     }
-    if (!ElmBle::connected()) { err = T("Verbindung während der Initialisierung abgerissen", "Connection dropped during initialisation"); return false; }
+    if (!ElmBle::connected()) { err = "Connection dropped during initialisation"; return false; }
     elmReady = true;
     needWarmup = true;
     Watchdog::step("Poller");
@@ -161,8 +160,8 @@ static bool ensureReady(String& err) {
   return true;
 }
 
-// Eigene Flow-Control (ATFCSM1) im Profil? Dann muss die Flow-Control-Adresse bei jedem
-// Adresswechsel mitwandern (z. B. IONIQ: 7E4 für das BMS, 7C6 für den Kilometerstand).
+// Custom flow control (ATFCSM1) in the profile? Then the flow control address must follow
+// every address change (e.g. IONIQ: 7E4 for the BMS, 7C6 for the odometer).
 static bool userFlowControl() {
   for (auto& c : profile.init) {
     String u = c;
@@ -195,23 +194,23 @@ static float readVoltage() {
   return (v > 5 && v < 20) ? v : NAN;
 }
 
-// Führt header+cmd aus und liefert Bytes
+// Runs header+cmd and returns bytes
 static bool query(const String& header, const String& cmd, std::vector<uint8_t>& bytes,
                   String& raw, String& err) {
   if (!setHeader(header)) {
-    err = ElmBle::connected() ? "ATSH" + header + T(" fehlgeschlagen", " failed") : String(T("BLE getrennt", "BLE disconnected"));
+    err = ElmBle::connected() ? "ATSH" + header + " failed" : String("BLE disconnected");
     return false;
   }
-  for (int attempt = 0; attempt < 3; attempt++) {   // bei unvollständiger Antwort bis zu 2× wiederholen
+  for (int attempt = 0; attempt < 3; attempt++) {   // retry up to 2× on incomplete response
     if (attempt) {
       String r = raw.substring(0, 80);
       r.replace("\r", "|");
-      logf(T("%s: %s – wiederhole (roh: %s)", "%s: %s – retrying (raw: %s)"), cmd.c_str(), err.c_str(), r.c_str());
+      logf("%s: %s – retrying (raw: %s)", cmd.c_str(), err.c_str(), r.c_str());
       delay(500);
     }
     lastQueryKind = ObdParse::ERR_OTHER;
     if (!elmCmd(cmd, raw)) {
-      err = ElmBle::connected() ? T("Timeout (kein Prompt)", "Timeout (no prompt)") : T("BLE getrennt", "BLE disconnected");
+      err = ElmBle::connected() ? "Timeout (no prompt)" : "BLE disconnected";
       if (!ElmBle::connected()) return false;
       continue;
     }
@@ -221,8 +220,8 @@ static bool query(const String& header, const String& cmd, std::vector<uint8_t>&
     lastQueryKind = ok ? ObdParse::ERR_NONE : ObdParse::lastErrKind;
     if (debugOn()) logf("[diag] %s %s → %s%s", header.c_str(), cmd.c_str(), oneLine(raw, 400).c_str(), ok ? "" : (String(" [") + err + "]").c_str());
     if (ok) return true;
-    // Wiederholen nur bei unvollständiger Antwort bzw. CAN-Fehler (typisch kurz nach dem Verbinden),
-    // nicht bei NO DATA / negativer Antwort
+    // Retry only on incomplete response or CAN error (typical shortly after connecting),
+    // not on NO DATA / negative response
     bool retry = ObdParse::lastErrKind == ObdParse::ERR_INCOMPLETE ||
                  (ObdParse::lastErrKind == ObdParse::ERR_CAN && attempt == 0);
     if (!retry) return false;
@@ -230,7 +229,7 @@ static bool query(const String& header, const String& cmd, std::vector<uint8_t>&
   return false;
 }
 
-// Letzte Werte aller PIDs an die Formel-Auswertung geben (Formeln dürfen andere PIDs per ID nutzen)
+// Pass the last values of all PIDs to formula evaluation (formulas may use other PIDs by ID)
 static void syncValues() {
   std::vector<std::pair<std::string, double>> v;
   std::lock_guard<std::mutex> lk(mtx);
@@ -259,7 +258,7 @@ static uint32_t msUntilNextDue(uint32_t now) {
   return best;
 }
 
-// Alle aktuellen Werte inkl. Profil als ein JSON: <base>/state
+// All current values incl. profile as one JSON: <base>/state
 static void publishStateJson() {
   JsonDocument d;
   d["profile"] = profile.name.length() ? profile.name : cfg.profile;
@@ -294,24 +293,23 @@ static void pollDue() {
     MqttHa::publishText("car", "offline");
     if (!cfg.keepConnected || !ElmBle::connected()) { ElmBle::disconnect(); elmReady = false; }
     nextConnectTry = millis() + cfg.retrySec * 1000UL;
-    // Schläft das Auto, schläft der Dongle (z. B. WiCAN) oft mit → nicht jede Minute dieselbe Meldung
+    // When the car sleeps, the dongle (e.g. WiCAN) often sleeps too → don't repeat the same message every minute
     if (carAsleep && cfg.sleepVoltage > 0) {
       if (!unreachLogged)
-        logf(T("BLE: %s – Dongle schläft vermutlich mit dem Auto, prüfe weiter jede Minute (wird nicht erneut gemeldet)",
-               "BLE: %s – dongle probably sleeps with the car, checking every minute (not reported again)"), err.c_str());
+        logf("BLE: %s – dongle probably sleeps with the car, checking every minute (not reported again)", err.c_str());
       unreachLogged = true;
     } else
-      logf(T("BLE: %s – neuer Versuch in %lus", "BLE: %s – retry in %lus"), err.c_str(), (unsigned long)cfg.retrySec);
+      logf("BLE: %s – retry in %lus", err.c_str(), (unsigned long)cfg.retrySec);
     std::lock_guard<std::mutex> lk(mtx);
     lastError = err;
     return;
   }
   if (unreachLogged) {
     unreachLogged = false;
-    logf("%s", T("Dongle wieder erreichbar", "Dongle reachable again"));
+    logf("%s", "Dongle reachable again");
   }
 
-  // 12V-Schutz
+  // 12V protection
   float v = readVoltage();
   {
     std::lock_guard<std::mutex> lk(mtx);
@@ -319,7 +317,7 @@ static void pollDue() {
   }
   if (!isnan(v)) MqttHa::publishValue("voltage_12v", v, 1);
   if (cfg.minVoltage > 0 && !isnan(v) && v < cfg.minVoltage) {
-    setError(String(T("12V zu niedrig (", "12V too low (")) + String(v, 1) + T(" V) – Abfrage pausiert", " V) – polling paused"));
+    setError(String("12V too low (") + String(v, 1) + " V) – polling paused");
     std::lock_guard<std::mutex> lk(mtx);
     for (size_t i = 0; i < states.size(); i++) if (isDue(i, now)) states[i].lastPoll = now;
     ElmBle::disconnect();
@@ -328,17 +326,17 @@ static void pollDue() {
     return;
   }
 
-  // Schlafmodus: Liegt die 12V-Spannung unter der Schwelle, ist das Auto aus und lädt nicht (kein DC/DC-Wandler).
-  // Jede CAN-Anfrage würde es wecken – dann nur die Spannung beobachten und nichts abfragen.
+  // Sleep mode: if the 12V voltage is below the threshold, the car is off and not charging (no DC/DC converter).
+  // Any CAN request would wake it – so only watch the voltage and don't poll anything.
   bool force = forcePoll;
   forcePoll = false;
-  // Spannung nicht lesbar: letzten Zustand beibehalten (lieber nicht abfragen, als das Auto zu wecken)
+  // Voltage unreadable: keep the last state (better not to poll than to wake the car)
   if (cfg.sleepVoltage > 0 && isnan(v) && carAsleep && !force) {
     if (!cfg.keepConnected) { ElmBle::disconnect(); elmReady = false; }
     nextConnectTry = now + 60000UL;
     return;
   }
-  // 12V-Warnung (mit 0,2 V Hysterese), unabhängig vom Schlafmodus
+  // 12V warning (with 0.2 V hysteresis), independent of sleep mode
   if (cfg.lowBattVoltage > 0 && !isnan(v)) {
     static int lowState = -1;
     int ls = lowState;
@@ -348,19 +346,19 @@ static void pollDue() {
     if (ls != lowState) {
       lowState = ls;
       MqttHa::publishText("battery_low", ls ? "ON" : "OFF");
-      if (ls) logf(T("WARNUNG: 12-V-Batterie niedrig (%.1f V < %.1f V)", "WARNING: 12 V battery low (%.1f V < %.1f V)"), v, cfg.lowBattVoltage);
+      if (ls) logf("WARNING: 12 V battery low (%.1f V < %.1f V)", v, cfg.lowBattVoltage);
     }
   }
   if (cfg.sleepVoltage > 0 && !isnan(v)) {
-    // Hysterese wie WiCAN: schlafen unter der Schwelle, wach erst ab Schwelle + 0,1 V
+    // Hysteresis like WiCAN: sleep below the threshold, awake only from threshold + 0.1 V
     bool asleep = carAsleep ? (v < cfg.sleepVoltage + 0.1f) : (v < cfg.sleepVoltage);
     if (asleep != carAsleep) {
       carAsleep = asleep;
-      ElmBle::quiet = asleep;   // im Schlaf jede Minute verbinden → nicht jedes Mal loggen
+      ElmBle::quiet = asleep;   // connect every minute while asleep → don't log each time
       MqttHa::publishText("car_awake", asleep ? "OFF" : "ON");
       if (asleep) {
-        logf(T("Auto schläft (12V %.1f V < %.1f V) – keine Abfragen, damit es schlafen kann", "Car asleep (12V %.1f V < %.1f V) – no queries so it can sleep"), v, cfg.sleepVoltage);
-        // Ein schlafendes Auto lädt nicht: Lade-Werte auf 0, sonst bliebe in HA der letzte Wert stehen
+        logf("Car asleep (12V %.1f V < %.1f V) – no queries so it can sleep", v, cfg.sleepVoltage);
+        // A sleeping car isn't charging: set charging values to 0, otherwise HA would keep the last value
         bool any = false;
         for (size_t i = 0; i < profile.pids.size() && i < states.size(); i++) {
           const PidDef& p = profile.pids[i];
@@ -375,27 +373,27 @@ static void pollDue() {
         if (any) publishStateJson();
       }
       else
-        logf(T("Auto wach (12V %.1f V) – normale Abfrage", "Car awake (12V %.1f V) – normal polling"), v);
+        logf("Car awake (12V %.1f V) – normal polling", v);
     }
     if (asleep && !force) {
-      // Periodisch wecken nur, wenn die 12-V-Batterie das verträgt (wie WiCAN: über 11,9 V)
+      // Wake periodically only if the 12 V battery can handle it (like WiCAN: above 11.9 V)
       bool sleepPollDue = cfg.sleepPollMin > 0 && v > 11.9f &&
                           (lastSleepPoll == 0 || now - lastSleepPoll >= cfg.sleepPollMin * 60000UL);
       if (!sleepPollDue) {
         if (!cfg.keepConnected) { ElmBle::disconnect(); elmReady = false; }
-        nextConnectTry = now + 60000UL;   // in 1 min wieder nur die Spannung prüfen (weckt das Auto nicht)
+        nextConnectTry = now + 60000UL;   // check only the voltage again in 1 min (doesn't wake the car)
         return;
       }
       lastSleepPoll = now;
-      logf(T("Abfrage trotz Schlaf (alle %lu min)", "Polling while asleep (every %lu min)"), (unsigned long)cfg.sleepPollMin);
+      logf("Polling while asleep (every %lu min)", (unsigned long)cfg.sleepPollMin);
     } else if (asleep && force) {
-      logf("%s", T("„Jetzt abfragen“ – Auto schläft, wird dafür geweckt", "“Poll now” – car is asleep and will be woken up"));
+      logf("%s", "“Poll now” – car is asleep and will be woken up");
     }
   }
 
-  // Aufwärmen (nur wenn das Auto wach ist bzw. geweckt werden darf): Das erste lange Telegramm nach dem
-  // Verbinden kommt oft abgeschnitten (IONIQ-Gateway). Ein kurzes „Tester Present“ (3E00) an das
-  // Steuergerät der ersten Abfrage weckt den Weg vorher auf – die Antwort wird ignoriert.
+  // Warm-up (only if the car is awake or may be woken): the first long message after
+  // connecting often arrives truncated (IONIQ gateway). A short "Tester Present" (3E00) to the
+  // ECU of the first query wakes up the path beforehand – the response is ignored.
   if (needWarmup) {
     needWarmup = false;
     for (size_t i = 0; i < profile.pids.size(); i++) {
@@ -412,8 +410,8 @@ static void pollDue() {
     }
   }
 
-  // Fällige PIDs abfragen; gleiche header+cmd nur einmal senden
-  // Antworten pro Zyklus merken: gleiche header+cmd nur einmal senden, auch wenn die PIDs nicht hintereinander stehen
+  // Poll due PIDs; send identical header+cmd only once
+  // Cache responses per cycle: send identical header+cmd only once, even if the PIDs aren't adjacent
   struct QRes { bool ok; std::vector<uint8_t> bytes; String raw, err; };
   std::map<String, QRes> cache;
   std::vector<uint8_t> bytes;
@@ -428,7 +426,7 @@ static void pollDue() {
       Watchdog::step(("query " + p.cmd).c_str());
       qok = query(p.header, p.cmd, bytes, raw, qerr);
       Watchdog::step("Poller");
-      // Auto hat geantwortet (auch wenn unvollständig/negativ) → es ist wach, keine Schlaf-Pause
+      // car responded (even if incomplete/negative) → it's awake, no sleep pause
       if (qok || lastQueryKind == ObdParse::ERR_INCOMPLETE || lastQueryKind == ObdParse::ERR_NRC) anyReply = true;
       cache[key] = QRes{qok, bytes, raw, qerr};
     } else {
@@ -444,7 +442,7 @@ static void pollDue() {
       perr = e.c_str();
       if (ok && ((!isnan(p.minVal) && val < p.minVal) || (!isnan(p.maxVal) && val > p.maxVal))) {
         ok = false;
-        perr = String(T("Wert ", "Value ")) + String(val, 2) + T(" außerhalb Bereich – verworfen", " out of range – discarded");
+        perr = String("Value ") + String(val, 2) + " out of range – discarded";
       }
     }
     {
@@ -467,40 +465,40 @@ static void pollDue() {
     if (!ElmBle::connected()) { elmReady = false; break; }
   }
   pollCycles++;
-  // Zyklus ohne Fehler → „Letzter Fehler“ zurücksetzen (sonst stünde ein alter Fehler ewig da)
-  // Zyklus ohne Fehler → „Letzter Fehler“ zurücksetzen und immer veröffentlichen
-  // (MQTT ist retained: nach einem Neustart stünde sonst der alte Fehler weiter im Broker)
+  // Cycle without errors → reset "last error" (otherwise an old error would stay forever)
+  // Cycle without errors → reset "last error" and always publish
+  // (MQTT is retained: otherwise the old error would remain in the broker after a reboot)
   if (anyTried && !anyErr) {
     {
       std::lock_guard<std::mutex> lk(mtx);
       lastError = "";
     }
-    MqttHa::publishText("last_error", T("keiner", "none"));
+    MqttHa::publishText("last_error", "none");
   }
   publishStateJson();
-  // Verbindung während der Abfrage abgerissen: kein Zeichen für ein schlafendes Auto → nach 60 s neu versuchen
+  // Connection lost during polling: not a sign of a sleeping car → retry after 60 s
   if (ElmBle::dropCount() != drops0) {
     elmReady = false;
     nextConnectTry = millis() + 60000UL;
-    logf("%s", T("BLE-Verbindung während der Abfrage abgerissen – neuer Versuch in 60s", "BLE connection dropped during polling – retry in 60s"));
+    logf("%s", "BLE connection dropped during polling – retry in 60s");
     {
-      // fehlgeschlagene PIDs beim nächsten Versuch wieder fällig (nicht abgefragte sind es ohnehin noch)
+      // failed PIDs due again on the next attempt (unpolled ones still are anyway)
       std::lock_guard<std::mutex> lk(mtx);
       for (size_t i = 0; i < states.size(); i++) if (states[i].lastPoll == now && !states[i].err.isEmpty()) states[i].lastPoll = 0;
     }
     return;
   }
-  // Keine Antwort (Auto schläft) → länger warten, damit nichts wachgehalten wird
+  // No response (car asleep) → wait longer so nothing is kept awake
   if (anyTried && !anyOk && !anyReply && cfg.backoffSec > 0) {
     nextConnectTry = millis() + cfg.backoffSec * 1000UL;
-    logf(T("Keine gültige Antwort – nächster Versuch in %lus", "No valid response – next attempt in %lus"), (unsigned long)cfg.backoffSec);
+    logf("No valid response – next attempt in %lus", (unsigned long)cfg.backoffSec);
     if (!cfg.keepConnected) { ElmBle::disconnect(); elmReady = false; }
   }
 }
 
 // ---------------------------------------------------------------
 
-static String diagText;   // letzter Diagnose-Bericht – über /api/diag abrufbar statt im Job-JSON (spart RAM)
+static String diagText;   // last diagnostic report – fetched via /api/diag instead of in the job JSON (saves RAM)
 size_t diagChunk(size_t offset, uint8_t* buf, size_t maxLen) {
   std::lock_guard<std::mutex> lk(mtx);
   if (offset >= diagText.length()) return 0;
@@ -514,28 +512,28 @@ static void setProgress(const String& p) {
   job.progress = p;
 }
 
-// Diagnose-Bericht: frische Verbindung, jede Init-Antwort, jede Abfrage mit Rohdaten und Bytes.
-// Enthält bewusst keine WLAN-/IP-/Passwortdaten, damit er öffentlich gepostet werden kann.
+// Diagnostic report: fresh connection, every init response, every query with raw data and bytes.
+// Deliberately contains no Wi-Fi/IP/password data so it can be posted publicly.
 static String diagReport() {
   String o;
   o.reserve(8000);
   auto ln = [&](const String& s) { o += s; o += '\n'; };
-  ln("=== OBD2MQTT " + String(T("Diagnose-Bericht", "diagnostic report")) + " ===");
+  ln("=== OBD2MQTT " + String("diagnostic report") + " ===");
   ln("Firmware: " FW_VERSION);
   if (timeValid()) {
     time_t tn = time(nullptr); struct tm tmv; localtime_r(&tn, &tmv);
     char tb[32]; strftime(tb, sizeof(tb), "%Y-%m-%d %H:%M:%S", &tmv);
-    ln(String(T("Zeit: ", "Time: ")) + tb);
+    ln(String("Time: ") + tb);
   }
-  ln(String(T("Profil: ", "Profile: ")) + cfg.profile + " – " + profile.name + " (" + profile.model + ")");
+  ln(String("Profile: ") + cfg.profile + " – " + profile.name + " (" + profile.model + ")");
   String mac = cfg.bleMac.length() == 17 ? cfg.bleMac.substring(0, 8) + ":xx:xx:xx" : cfg.bleMac;
   ln("Dongle: " + ElmBle::deviceName() + " / " + ElmBle::dongleKind() + " / " + mac);
-  ln(String(T("Letzter Neustart: ", "Last restart: ")) + Watchdog::resetReason() +
-     (strlen(Watchdog::hangStep()) ? String(T(" – hing bei: ", " – hung at: ")) + Watchdog::hangStep() : String("")));
-  ln(String(T("BLE-Verbindungsparameter: ", "BLE connection parameters: ")) +
-     (ElmBle::relaxedParams() ? T("langsam (nach wiederholtem 0x208)", "slow (after repeated 0x208)") : T("schnell (7,5–15 ms)", "fast (7.5–15 ms)")) +
-     ", " + T("Abbrüche seit Start: ", "drops since boot: ") + String(ElmBle::dropCount()));
-  if (!isnan(lastVoltage)) ln(String(T("12V (letzte Messung): ", "12V (last reading): ")) + String(lastVoltage, 1) + " V");
+  ln(String("Last restart: ") + Watchdog::resetReason() +
+     (strlen(Watchdog::hangStep()) ? String(" – hung at: ") + Watchdog::hangStep() : String("")));
+  ln(String("BLE connection parameters: ") +
+     (ElmBle::relaxedParams() ? "slow (after repeated 0x208)" : "fast (7.5–15 ms)") +
+     ", " + "drops since boot: " + String(ElmBle::dropCount()));
+  if (!isnan(lastVoltage)) ln(String("12V (last reading): ") + String(lastVoltage, 1) + " V");
 
   setProgress("BLE");
   Watchdog::step("diag report");
@@ -543,15 +541,15 @@ static String diagReport() {
   elmReady = false;
   currentHeader = "";
   String err;
-  // bis zu 3 Versuche – ein einzelner Aussetzer soll nicht den ganzen Bericht wertlos machen
+  // up to 3 attempts – a single glitch shouldn't make the whole report worthless
   bool con = false;
   for (int a = 0; a < 3 && !con; a++) {
     Watchdog::feed();
-    if (a) { ln(String(T("BLE-Versuch ", "BLE attempt ")) + a + T(" fehlgeschlagen: ", " failed: ") + err); delay(2000); }
+    if (a) { ln(String("BLE attempt ") + a + " failed: " + err); delay(2000); }
     err = "";
     con = ElmBle::connect(err);
   }
-  if (!con) { ln(String(T("BLE-Verbindung fehlgeschlagen: ", "BLE connection failed: ")) + err); Watchdog::step("Poller"); return o; }
+  if (!con) { ln(String("BLE connection failed: ") + err); Watchdog::step("Poller"); return o; }
   ln("BLE: RSSI " + String(ElmBle::rssi()) + " dBm, MTU " + String(ElmBle::mtu()) + ", UUIDs " + ElmBle::detectedUuids());
 
   ln("");
@@ -562,10 +560,10 @@ static String diagReport() {
     String r;
     bool ok = elmCmd(c, r, c.startsWith("ATZ") || c.startsWith("AT Z") ? 4000 : 0);
     if (c.startsWith("ATZ")) delay(300);
-    String flag = !ok ? T("   <-- KEIN PROMPT", "   <-- NO PROMPT") : rejected(r) ? T("   <-- ABGELEHNT", "   <-- REJECTED") : "";
+    String flag = !ok ? "   <-- NO PROMPT" : rejected(r) ? "   <-- REJECTED" : "";
     if (flag.length()) initBad++;
     ln(c + " → " + oneLine(r, 80) + flag);
-    if (!ElmBle::connected()) { ln(T("!!! BLE-Verbindung abgerissen – Bericht unvollständig", "!!! BLE connection dropped – report incomplete")); Watchdog::step("Poller"); return o; }
+    if (!ElmBle::connected()) { ln("!!! BLE connection dropped – report incomplete"); Watchdog::step("Poller"); return o; }
   }
   delay(300);
   for (const char* c : {"ATI", "AT@1", "ATRV", "ATDPN"}) {
@@ -581,7 +579,7 @@ static String diagReport() {
   }
 
   ln("");
-  ln(String("--- ") + T("Abfragen", "Queries") + " ---");
+  ln(String("--- ") + "Queries" + " ---");
   std::vector<String> keys;
   for (auto& p : profile.pids) {
     String k = p.header + "|" + p.cmd;
@@ -593,12 +591,12 @@ static String diagReport() {
   for (auto& k : keys) {
     Watchdog::feed();
     idx++;
-    if (!ElmBle::connected()) { ln(""); ln(T("!!! BLE-Verbindung abgerissen – restliche Abfragen übersprungen", "!!! BLE connection dropped – remaining queries skipped")); break; }
+    if (!ElmBle::connected()) { ln(""); ln("!!! BLE connection dropped – remaining queries skipped"); break; }
     setProgress(String(idx) + "/" + String(keys.size()));
     String header = k.substring(0, k.indexOf('|')), cmd = k.substring(k.indexOf('|') + 1);
     ln("");
     ln("[" + header + " " + cmd + "]");
-    if (!setHeader(header)) { ln(T("  ATSH fehlgeschlagen", "  ATSH failed")); nFail++; continue; }
+    if (!setHeader(header)) { ln("  ATSH failed"); nFail++; continue; }
     std::vector<uint8_t> bytes;
     bool ok = false;
     ObdParse::ErrKind kind = ObdParse::ERR_OTHER;
@@ -612,8 +610,8 @@ static String diagReport() {
       std::string e;
       ok = prompt && ObdParse::parseResponse(raw.c_str(), cmd.c_str(), bytes, e);
       kind = prompt ? (ok ? ObdParse::ERR_NONE : ObdParse::lastErrKind) : ObdParse::ERR_OTHER;
-      ln("  " + String(T("Versuch ", "attempt ")) + String(a + 1) + " (" + String(dt) + " ms): " + oneLine(raw, 600) +
-         (ok ? "" : String("  [") + (prompt ? e.c_str() : T("kein Prompt", "no prompt")) + "]"));
+      ln("  " + String("attempt ") + String(a + 1) + " (" + String(dt) + " ms): " + oneLine(raw, 600) +
+         (ok ? "" : String("  [") + (prompt ? e.c_str() : "no prompt") + "]"));
       if (!ok && !(kind == ObdParse::ERR_INCOMPLETE || kind == ObdParse::ERR_CAN)) break;
     }
     if (ok) {
@@ -629,7 +627,7 @@ static String diagReport() {
     else nFail++;
     for (auto& p : profile.pids) {
       if (p.header + "|" + p.cmd != k) continue;
-      String line = "  -> " + p.id + (p.enabled ? "" : T(" (aus)", " (off)")) + ": " + p.formula + " = ";
+      String line = "  -> " + p.id + (p.enabled ? "" : " (off)") + ": " + p.formula + " = ";
       if (ok) {
         double v; std::string e;
         syncValues();
@@ -640,13 +638,13 @@ static String diagReport() {
     }
   }
   ln("");
-  ln(String("--- ") + T("Zusammenfassung", "Summary") + " ---");
+  ln(String("--- ") + "Summary" + " ---");
   Watchdog::step("Poller");
-  ln(String("BLE: ") + (ElmBle::connected() ? String("RSSI ") + ElmBle::rssi() + " dBm" : String(T("Verbindung am Ende getrennt", "connection lost at the end"))) +
-     ", " + T("Abbrüche seit Start: ", "drops since boot: ") + String(ElmBle::dropCount()));
-  ln(String(T("Init-Probleme: ", "Init problems: ")) + initBad);
-  ln(String(T("Abfragen OK: ", "Queries OK: ")) + nOk + " / " + keys.size() + ", " + T("unvollständig: ", "incomplete: ") + nInc +
-     ", " + T("ohne Antwort/Fehler: ", "no answer/error: ") + nFail);
+  ln(String("BLE: ") + (ElmBle::connected() ? String("RSSI ") + ElmBle::rssi() + " dBm" : String("connection lost at the end")) +
+     ", " + "drops since boot: " + String(ElmBle::dropCount()));
+  ln(String("Init problems: ") + initBad);
+  ln(String("Queries OK: ") + nOk + " / " + keys.size() + ", " + "incomplete: " + nInc +
+     ", " + "no answer/error: " + nFail);
   return o;
 }
 
@@ -660,16 +658,16 @@ static void runJob() {
   }
   JsonDocument r;
   if (j.type == JOB_DIAG) {
-    logf("%s", T("Diagnose-Bericht wird erstellt…", "Creating diagnostic report…"));
+    logf("%s", "Creating diagnostic report…");
     String rep = diagReport();
     r["len"] = rep.length();
     {
       std::lock_guard<std::mutex> lk(mtx);
-      diagText = "";          // alten Bericht zuerst freigeben
+      diagText = "";          // free the old report first
       diagText = std::move(rep);
     }
     r["ok"] = true;
-    logf("%s", T("Diagnose-Bericht fertig", "Diagnostic report done"));
+    logf("%s", "Diagnostic report done");
   } else if (j.type == JOB_SCAN) {
     Watchdog::step("BLE scan");
     ElmBle::disconnect();
@@ -692,10 +690,10 @@ static void runJob() {
       String resp;
       bool ok = elmCmd(j.cmd, resp, 6000);
       String up = j.cmd; up.toUpperCase();
-      if (up.startsWith("AT")) currentHeader = "";   // Header evtl. manuell geändert
+      if (up.startsWith("AT")) currentHeader = "";   // header may have been changed manually
       r["ok"] = ok;
       r["raw"] = resp;
-      if (!ok) r["error"] = T("Kein Prompt (Timeout)", "No prompt (timeout)");
+      if (!ok) r["error"] = "No prompt (timeout)";
     } else {  // JOB_TEST
       std::vector<uint8_t> bytes;
       String raw;
@@ -781,7 +779,7 @@ static void applyEnable() {
   if (cfg.pollEnabled == on) return;
   cfg.pollEnabled = on;
   saveConfig();
-  logf("%s", on ? T("Abfrage eingeschaltet", "Polling switched on") : T("Abfrage ausgeschaltet – keine Verbindung zum Auto", "Polling switched off – no connection to the car"));
+  logf("%s", on ? "Polling switched on" : "Polling switched off – no connection to the car");
   if (on) nextConnectTry = 0;
 }
 
@@ -802,7 +800,7 @@ static void applyPendingConfig() {
   }
   saveConfig();
   logSetPersist(cfg.logPersist);
-  logf("%s", T("Konfiguration gespeichert", "Configuration saved"));
+  logf("%s", "Configuration saved");
   if (before.bleMac != cfg.bleMac || before.bleService != cfg.bleService ||
       before.bleNotify != cfg.bleNotify || before.bleWrite != cfg.bleWrite ||
       before.bleAddrType != cfg.bleAddrType) {
@@ -811,8 +809,8 @@ static void applyPendingConfig() {
     nextConnectTry = 0;
   }
   if (before.profile != cfg.profile) reloadProfile();
-  if (before.deviceName != cfg.deviceName || before.lang != cfg.lang) MqttHa::requestDiscovery();
-  // WLAN/MQTT-Änderungen werden durch Neustart aus der Web-UI wirksam
+  if (before.deviceName != cfg.deviceName) MqttHa::requestDiscovery();
+  // Wi-Fi/MQTT changes take effect via reboot from the web UI
 }
 
 static bool bleOn = true;
@@ -827,7 +825,7 @@ static void updateCache() {
   int r = b ? ElmBle::rssi() : 0;
   bool m = MqttHa::connected();
   static uint32_t lastInfo = 0;
-  bool info = millis() - lastInfo > 2000;   // Texte nur gelegentlich kopieren
+  bool info = millis() - lastInfo > 2000;   // copy texts only occasionally
   String nm, kd, uu;
   if (info) { lastInfo = millis(); nm = ElmBle::deviceName(); kd = ElmBle::dongleKind(); uu = ElmBle::detectedUuids(); }
   std::lock_guard<std::mutex> lk(mtx);
@@ -839,7 +837,7 @@ static volatile bool paused = false;
 bool isPaused() { return paused || !bleOn; }
 void setPaused(bool p) {
   paused = p;
-  if (p) logf("%s", T("Abfragen pausiert (Firmware-Update)", "Polling paused (firmware update)"));
+  if (p) logf("%s", "Polling paused (firmware update)");
 }
 
 void loop() {
@@ -850,7 +848,7 @@ void loop() {
   if (flagProfileReload) { flagProfileReload = false; reloadProfile(); }
   runJob();
 
-  // Hauptschalter aus: keine automatische Abfrage, Dongle trennen (Test/Terminal/„Jetzt abfragen“ gehen weiter)
+  // Main switch off: no automatic polling, disconnect dongle (test/terminal/"Poll now" keep working)
   if (!cfg.pollEnabled && !flagPollNow) {
     if (ElmBle::connected() && !cfg.keepConnected) {
       bool jobBusy;
@@ -884,7 +882,7 @@ void loop() {
       jobBusy = job.state == "pending" || job.state == "running";
     }
     if (!jobBusy && (!lastJobMs || millis() - lastJobMs > 60000)) {
-      ElmBle::disconnect();   // Dongle darf schlafen
+      ElmBle::disconnect();   // dongle may sleep
       elmReady = false;
     }
   }

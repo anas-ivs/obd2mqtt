@@ -2,18 +2,17 @@
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include "log.h"
-#include "i18n.h"
 
 namespace Watchdog {
 
 static const uint32_t MAGIC = 0x0BD2A5E1;
 static const uint32_t TASK_WDT_S = 60;
-static const uint32_t WIFI_MAX_MS = 15UL * 60 * 1000;   // WLAN 15 min weg → Neustart
-static const uint32_t MQTT_MAX_MS = 20UL * 60 * 1000;   // MQTT 20 min weg → Neustart
-static const uint32_t STABLE_MS = 3UL * 60 * 1000;      // 3 min stabil → Absturzzähler löschen
-static const uint32_t SAFE_AFTER = 3;                   // ab 3 Abstürzen in Folge: sicherer Modus
+static const uint32_t WIFI_MAX_MS = 15UL * 60 * 1000;   // WiFi down 15 min → restart
+static const uint32_t MQTT_MAX_MS = 20UL * 60 * 1000;   // MQTT down 20 min → restart
+static const uint32_t STABLE_MS = 3UL * 60 * 1000;      // stable for 3 min → clear crash counter
+static const uint32_t SAFE_AFTER = 3;                   // from 3 consecutive crashes: safe mode
 
-// überlebt Software-Resets (nicht aber Stromausfall)
+// survives software resets (but not power loss)
 RTC_NOINIT_ATTR static uint32_t rtcMagic;
 RTC_NOINIT_ATTR static uint32_t rtcCrashes;
 RTC_NOINIT_ATTR static char rtcWhy[64];
@@ -30,16 +29,16 @@ static String rstWhy;
 
 static const char* rawReason(esp_reset_reason_t r) {
   switch (r) {
-    case ESP_RST_POWERON:  return T("Einschalten", "Power on");
-    case ESP_RST_SW:       return T("Software-Neustart", "Software restart");
-    case ESP_RST_PANIC:    return T("Absturz (Exception/Panic)", "Crash (exception/panic)");
-    case ESP_RST_INT_WDT:  return "Interrupt-Watchdog";
-    case ESP_RST_TASK_WDT: return T("Task-Watchdog (Firmware hing)", "Task watchdog (firmware hung)");
+    case ESP_RST_POWERON:  return "Power on";
+    case ESP_RST_SW:       return "Software restart";
+    case ESP_RST_PANIC:    return "Crash (exception/panic)";
+    case ESP_RST_INT_WDT:  return "Interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "Task watchdog (firmware hung)";
     case ESP_RST_WDT:      return "Watchdog";
-    case ESP_RST_BROWNOUT: return T("Unterspannung (Brownout) – Netzteil/Kabel prüfen", "Brownout – check power supply/cable");
+    case ESP_RST_BROWNOUT: return "Brownout – check power supply/cable";
     case ESP_RST_DEEPSLEEP:return "Deep sleep";
-    case ESP_RST_EXT:      return T("Reset-Taste", "Reset button");
-    default:               return T("unbekannt", "unknown");
+    case ESP_RST_EXT:      return "Reset button";
+    default:               return "unknown";
   }
 }
 
@@ -64,10 +63,10 @@ void begin() {
   rtcStep[0] = 0;
 
   safe = rtcCrashes >= SAFE_AFTER;
-  logf(T("Letzter Neustart: %s%s", "Last restart: %s%s"), reason.c_str(),
-       crash ? (String(" (") + rtcCrashes + T(". in Folge)", " in a row)")).c_str() : "");
-  if (hang.length()) logf(T("Firmware hing bei: %s", "Firmware hung at: %s"), hang.c_str());
-  if (safe) logf(T("SICHERER MODUS: %lu Abstürze in Folge – Bluetooth/Abfragen deaktiviert", "SAFE MODE: %lu crashes in a row – Bluetooth/polling disabled"), (unsigned long)rtcCrashes);
+  logf("Last restart: %s%s", reason.c_str(),
+       crash ? (String(" (") + rtcCrashes + " in a row)").c_str() : "");
+  if (hang.length()) logf("Firmware hung at: %s", hang.c_str());
+  if (safe) logf("SAFE MODE: %lu crashes in a row – Bluetooth/polling disabled", (unsigned long)rtcCrashes);
 }
 
 void armTaskWdt() {
@@ -78,7 +77,7 @@ void armTaskWdt() {
   esp_task_wdt_init(TASK_WDT_S, true);
 #endif
   if (esp_task_wdt_add(NULL) == ESP_OK) armed = true;
-  logf(T("Watchdog aktiv (Hänger > %lus → Neustart)", "Watchdog active (hang > %lus → restart)"), (unsigned long)TASK_WDT_S);
+  logf("Watchdog active (hang > %lus → restart)", (unsigned long)TASK_WDT_S);
 }
 
 void feed() {
@@ -87,7 +86,7 @@ void feed() {
 
 void restart(const char* why) {
   strlcpy(rtcWhy, why, sizeof(rtcWhy));
-  logf(T("Neustart: %s", "Restart: %s"), why);
+  logf("Restart: %s", why);
   logFlush();
   delay(300);
   ESP.restart();
@@ -107,24 +106,24 @@ void loop(bool wifiUp, bool mqttConfigured, bool mqttUp, bool apClients) {
   uint32_t now = millis();
   if (!stable && now > STABLE_MS) {
     stable = true;
-    if (rtcCrashes) logf("%s", T("System stabil – Absturzzähler zurückgesetzt", "System stable – crash counter reset"));
+    if (rtcCrashes) logf("%s", "System stable – crash counter reset");
     rtcCrashes = 0;
   }
-  // WLAN weg (und niemand im Setup-AP) → Neustart
+  // WiFi down (and no one on the setup AP) → restart
   if (!wifiUp && !apClients) {
     if (!wifiDownSince) wifiDownSince = now;
-    if (now - wifiDownSince > WIFI_MAX_MS) restart(T("WLAN 15 min nicht verbunden", "WiFi not connected for 15 min"));
+    if (now - wifiDownSince > WIFI_MAX_MS) restart("WiFi not connected for 15 min");
   } else wifiDownSince = 0;
-  // MQTT weg obwohl WLAN da → Neustart
+  // MQTT down although WiFi is up → restart
   if (wifiUp && mqttConfigured && !mqttUp) {
     if (!mqttDownSince) mqttDownSince = now;
-    if (now - mqttDownSince > MQTT_MAX_MS) restart(T("MQTT 20 min nicht verbunden", "MQTT not connected for 20 min"));
+    if (now - mqttDownSince > MQTT_MAX_MS) restart("MQTT not connected for 20 min");
   } else mqttDownSince = 0;
 }
 
 bool safeMode() { return safe; }
 uint32_t crashCount() { return rtcCrashes; }
-const char* resetReason() {   // in der aktuell eingestellten Sprache
+const char* resetReason() {
   static String s;
   s = rstWhy.length() ? String("Watchdog: ") + rstWhy : String(rawReason(rstCode));
   return s.c_str();

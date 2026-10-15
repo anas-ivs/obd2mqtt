@@ -25,7 +25,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 .dot{flex:none;width:10px;height:10px;border-radius:50%;margin-top:7px;background:var(--mut)}.dot.ok{background:var(--ok)}.dot.err{background:var(--err)}.dot.warn{background:var(--warn)}
 .hide{display:none!important}.nores{color:var(--mut);text-align:center;padding:20px}
 </style></head><body>
-<header><a href="/">← back to the interface</a><a href="/hilfe?lang=de" style="margin-right:14px">🇩🇪 Deutsch</a><h1>OBD2MQTT – Manual</h1><div class="sub" id="ver">User manual</div>
+<header><a href="/">← back to the interface</a><h1>OBD2MQTT – Manual</h1><div class="sub" id="ver">User manual</div>
 <input id="q" type="search" placeholder="Search the manual … (e.g. “NO DATA”, “update”, “password”)" oninput="search(this.value)"></header>
 <main>
 <p class="nores hide" id="nores">Nothing found – try another term.</p>
@@ -36,26 +36,26 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <div id="checks"><div class="chk"><span class="dot"></span><span>Loading status …</span></div></div>
 </section>
 
-<section id="inhalt">
+<section id="contents">
 <h2>Contents</h2>
 <ol class="toc">
-<li><a href="#was">What does the device do?</a></li>
-<li><a href="#brauche">What do I need?</a></li>
+<li><a href="#about">What does the device do?</a></li>
+<li><a href="#requirements">What do I need?</a></li>
 <li><a href="#install">First installation</a></li>
-<li><a href="#einrichten">Setup step by step</a></li>
-<li><a href="#bedienung">The interface</a></li>
+<li><a href="#setup">Setup step by step</a></li>
+<li><a href="#usage">The interface</a></li>
 <li><a href="#ha">Values in Home Assistant</a></li>
-<li><a href="#werte">Which values are available?</a></li>
-<li><a href="#eigene">Adding your own values</a></li>
+<li><a href="#values">Which values are available?</a></li>
+<li><a href="#custom">Adding your own values</a></li>
 <li><a href="#update">Updating the firmware</a></li>
 <li><a href="#backup">Backup &amp; restore</a></li>
-<li><a href="#akku">12 V battery &amp; saving power</a></li>
-<li><a href="#fehler">Troubleshooting</a></li>
-<li><a href="#begriffe">Glossary</a></li>
+<li><a href="#battery">12 V battery &amp; saving power</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+<li><a href="#glossary">Glossary</a></li>
 </ol>
 </section>
 
-<section id="was">
+<section id="about">
 <h2>1. What does the device do?</h2>
 <p>The small ESP32 in your garage connects via <b>Bluetooth</b> to the OBD2 dongle in your car, reads data such as <b>state of charge (SoC)</b>, <b>battery temperature</b> and <b>odometer</b> and sends it via <b>MQTT</b> to <b>Home Assistant</b>.</p>
 <p>This is how it fits together:</p>
@@ -63,7 +63,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <p>As soon as the car is within range (typically 5–15 m) and awake – e.g. while charging – the values arrive automatically. If the car is away or asleep, Home Assistant keeps the last value.</p>
 </section>
 
-<section id="brauche">
+<section id="requirements">
 <h2>2. What do I need?</h2>
 <ul>
 <li>An <b>ESP32</b> (e.g. ESP32-DevKitC) with a USB power supply within Bluetooth range of the car.</li>
@@ -87,13 +87,12 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <div class="box warn">The <b>factory.bin</b> is for USB only. For later updates via the interface use the <b>ota.bin</b> (see <a href="#update">chapter 9</a>).</div>
 </section>
 
-<section id="einrichten">
+<section id="setup">
 <h2>4. Setup step by step</h2>
 <h3>4.1 Connect to the device</h3>
 <ol>
 <li>Connect your phone or laptop to the WiFi <code>OBD2MQTT-xxxx</code> – password <code>obd2mqtt</code>.</li>
 <li>Usually the setup page opens by itself, otherwise open <code>http://192.168.4.1</code> in the browser.</li>
-<li>Choose your language at the top right (🇩🇪 DE / 🇬🇧 EN).</li>
 </ol>
 <h3>4.2 WiFi</h3>
 <ol>
@@ -118,7 +117,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <div class="box ok">Done! From now on the <b>Status</b> tab shows the current values, and a new device appears in Home Assistant.</div>
 </section>
 
-<section id="bedienung">
+<section id="usage">
 <h2>5. The interface</h2>
 <table>
 <tr><th>Tab</th><th>What for?</th></tr>
@@ -142,7 +141,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <tr><td>Keep BLE connected permanently</td><td>“no” = dongle may sleep between polls (recommended).</td><td>no</td></tr>
 <tr><td>IP address</td><td>“automatic (DHCP)” or a static address. “Use current values” fills in IP, mask, gateway and DNS of the running connection. The address must be outside the router's DHCP range. If the static IP does not work after the restart (no WiFi or MQTT broker not reachable), the bridge automatically uses DHCP and reports this in the log and under System.</td><td>DHCP</td></tr>
 <tr><td>Web password</td><td>Protects the interface. Log in with user <code>admin</code>.</td><td>empty</td></tr>
-<tr><td>Time zone</td><td>For the time in the log. Choose from the list; the current time on the device is shown below.</td><td>Central Europe</td></tr>
+<tr><td>Time zone</td><td>For the time in the log. Choose from the list; the current time on the device is shown below.</td><td>Malaysia (MYT-8)</td></tr>
 <tr><td>Store log permanently</td><td>Log survives restarts – helpful for troubleshooting.</td><td>yes</td></tr>
 </table>
 </section>
@@ -164,7 +163,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <p>For your own evaluations the device additionally sends all values including the profile as one JSON to <code>obd2mqtt/state</code> after each poll, e.g. <code>{"profile":"XPeng G9","values":{"soc":71.5,…}}</code>.</p>
 </section>
 
-<section id="werte">
+<section id="values">
 <h2>7. Which values are available?</h2>
 <p>In the <b>Profile</b> tab you can enable or disable individual values with the checkbox in column “Active” – the checkbox in the column header switches all at once – and then click <b>Save profile</b>. In the factory profiles all values are active.</p>
 <h3>Hyundai IONIQ 5 (also Kia EV6, IONIQ 6)</h3>
@@ -177,10 +176,9 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <p>The range shown in the cockpit cannot be read. “Range (calculated)” estimates it from SoC × battery capacity ÷ consumption. Adapt the formula to your car, e.g. <code>B34/2/100*63/0.17</code> for 63 kWh and 17 kWh/100 km. The XPeng additionally offers the “CLTC range” – usually 15–20 % more optimistic than WLTP.</p>
 <h3>How often is polled?</h3>
 <p>Column <b>Interval s</b> in the profile: SoC every 120 s, temperatures every 300 s, odometer every 1800 s. Values with the same command are best polled with the same interval.</p>
-<p>Note: the value names of the factory profiles follow the language that is active when they are installed. After switching the language, <b>Restore factory profiles</b> (System tab) renames them.</p>
 </section>
 
-<section id="eigene">
+<section id="custom">
 <h2>8. Adding your own values (for the curious)</h2>
 <ol>
 <li>Profile → <b>+ PID</b>.</li>
@@ -213,7 +211,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <div class="box">Tip: before re-flashing with “Erase Flash”, always take a backup including passwords – afterwards the device is set up again within a minute (connect to the setup WiFi → System → Restore).</div>
 </section>
 
-<section id="akku">
+<section id="battery">
 <h2>10. 12 V battery &amp; saving power</h2>
 <ul>
 <li>The dongle stays plugged into the car and needs a little power. Use a dongle with <b>automatic sleep mode</b>.</li>
@@ -224,7 +222,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 </ul>
 </section>
 
-<section id="fehler">
+<section id="troubleshooting">
 <h2>11. Troubleshooting</h2>
 <div class="box"><b>Diagnostic report for beta testers</b><br>
 If no values or wrong values arrive, a diagnostic report helps most:
@@ -246,7 +244,7 @@ For problems that only occur occasionally: switch on the <b>diagnostic log</b> �
 <details><summary>“Incomplete response” in the log</summary>
 <p>The dongle did not deliver a long response completely. The firmware then retries automatically. If it happens often: add <code>ATST96</code> to the init commands in the profile.</p></details>
 <details><summary>A value is obviously wrong</summary>
-<p>Click <b>Test</b> next to the value in the profile and compare with the display in the car. Often just the byte number in the formula is wrong (see <a href="#eigene">chapter 8</a>).</p></details>
+<p>Click <b>Test</b> next to the value in the profile and compare with the display in the car. Often just the byte number in the formula is wrong (see <a href="#custom">chapter 8</a>).</p></details>
 <details><summary>Interface not reachable</summary>
 <p>Briefly disconnect the ESP32 from power. If the WiFi is not reachable for 3 minutes, it opens the setup WiFi <code>OBD2MQTT-xxxx</code> again. If the firmware hangs for longer than 60 s, it restarts by itself.</p></details>
 <details><summary>Red notice “Safe mode”</summary>
@@ -257,7 +255,7 @@ For problems that only occur occasionally: switch on the <b>diagnostic log</b> �
 <p>In the Status tab click <b>Copy</b> at the log and pass on the text together with the version (top left).</p></details>
 </section>
 
-<section id="begriffe">
+<section id="glossary">
 <h2>12. Glossary</h2>
 <table>
 <tr><td><b>OBD2</b></td><td>Diagnostic connector in the car, usually in the footwell on the driver's side.</td></tr>
@@ -282,32 +280,32 @@ function openSec(id){search('');$('q').value='';const d=document.querySelector('
 async function check(){try{const s=await (await fetch('/api/status')).json();
  $('ver').textContent='User manual · firmware v'+s.fw;
  let h='';
- h+=s.safe_mode?chk('err','<b>Safe mode active</b> – Bluetooth is off.','fehler'):'';
- h+=s.wifi.connected?chk('ok',`WiFi connected to <b>${esc(s.wifi.ssid)}</b> (${s.wifi.rssi} dBm)`):chk('err','No WiFi – check the setup.','einrichten');
- h+=s.mqtt?chk('ok','MQTT connected – values go to Home Assistant.'):chk('err','MQTT not connected – no values in Home Assistant.','fehler');
- if(!s.ble.mac)h+=chk('warn','No dongle set up yet.','einrichten');
+ h+=s.safe_mode?chk('err','<b>Safe mode active</b> – Bluetooth is off.','troubleshooting'):'';
+ h+=s.wifi.connected?chk('ok',`WiFi connected to <b>${esc(s.wifi.ssid)}</b> (${s.wifi.rssi} dBm)`):chk('err','No WiFi – check the setup.','setup');
+ h+=s.mqtt?chk('ok','MQTT connected – values go to Home Assistant.'):chk('err','MQTT not connected – no values in Home Assistant.','troubleshooting');
+ if(!s.ble.mac)h+=chk('warn','No dongle set up yet.','setup');
  else if(s.ble.connected)h+=chk('ok',`Dongle connected (${s.ble.rssi} dBm)`);
- else h+=chk(s.ble.last_ok_s>=0?'ok':'warn',`Dongle ${esc(s.ble.mac)} currently not connected${s.ble.last_ok_s>=0?' – last reachable '+fmt(s.ble.last_ok_s)+' ago (normal: Bluetooth is disconnected between polls)':' – never reached'}.`,s.ble.last_ok_s>=0?'':'fehler');
+ else h+=chk(s.ble.last_ok_s>=0?'ok':'warn',`Dongle ${esc(s.ble.mac)} currently not connected${s.ble.last_ok_s>=0?' – last reachable '+fmt(s.ble.last_ok_s)+' ago (normal: Bluetooth is disconnected between polls)':' – never reached'}.`,s.ble.last_ok_s>=0?'':'troubleshooting');
  const act=(s.pids||[]).filter(p=>p.enabled);
  const got=act.filter(p=>p.age_s>=0);
  h+=got.length?chk('ok',`Profile <b>${esc(s.profile_name||s.profile)}</b>: ${got.length} of ${act.length} values received (e.g. ${esc(got[0].name)} = ${esc(got[0].value)} ${esc(got[0].unit)}).`)
-             :chk('warn',`Profile <b>${esc(s.profile_name||s.profile)}</b>: no values yet – switch the car on or let it charge.`,'werte');
- if(s.voltage!==undefined)h+=chk(s.voltage<12.2?'warn':'ok',`12 V battery: ${s.voltage.toFixed(1)} V`,s.voltage<12.2?'akku':'');
- if(s.last_error){const e=s.last_error,l=/NO DATA|CAN ERROR/.test(e)?'fehler':/Unvollst|Incomplete/.test(e)?'fehler':/nicht erreichbar/.test(e)?'fehler':'fehler';
+             :chk('warn',`Profile <b>${esc(s.profile_name||s.profile)}</b>: no values yet – switch the car on or let it charge.`,'values');
+ if(s.voltage!==undefined)h+=chk(s.voltage<12.2?'warn':'ok',`12 V battery: ${s.voltage.toFixed(1)} V`,s.voltage<12.2?'battery':'');
+ if(s.last_error){const e=s.last_error,l='troubleshooting';
   h+=chk('warn','Last message: <code>'+esc(e)+'</code>',l)}
  h+=chk('ok','Last restart: '+esc(s.reset_reason||'–')+' · uptime '+fmt(s.uptime));
  $('checks').innerHTML=h}catch(e){$('checks').innerHTML=chk('err','Status not available.')}}
 const fmt=s=>s<60?s+' s':s<3600?Math.round(s/60)+' min':s<86400?Math.round(s/3600)+' h':Math.round(s/86400)+' days';
 check();setInterval(check,10000);
 // ---------- Suche ----------
-const secs=[...document.querySelectorAll('main section')].filter(x=>x.id!=='check'&&x.id!=='inhalt');
+const secs=[...document.querySelectorAll('main section')].filter(x=>x.id!=='check'&&x.id!=='contents');
 secs.forEach(x=>x.dataset.html=x.innerHTML);
 function search(q){q=q.trim();let any=false;
  secs.forEach(x=>{x.innerHTML=x.dataset.html;
   if(!q){x.classList.remove('hide');return}
   const hit=x.textContent.toLowerCase().includes(q.toLowerCase());x.classList.toggle('hide',!hit);
   if(hit){any=true;x.querySelectorAll('details').forEach(d=>{if(d.textContent.toLowerCase().includes(q.toLowerCase()))d.open=true});mark(x,q)}});
- ['check','inhalt'].forEach(id=>$(id).classList.toggle('hide',!!q));
+ ['check','contents'].forEach(id=>$(id).classList.toggle('hide',!!q));
  $('nores').classList.toggle('hide',!q||any)}
 function mark(root,q){const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);const nodes=[];while(w.nextNode())nodes.push(w.currentNode);
  const re=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');

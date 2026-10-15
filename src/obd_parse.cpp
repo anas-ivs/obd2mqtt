@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include "tinyexpr.h"
-#include "i18n.h"
 
 namespace ObdParse {
 
@@ -38,7 +37,7 @@ bool parseResponse(const std::string& rawIn, const std::string& cmd,
   ErrKind kind = ERR_OTHER;
   std::string raw = upper(rawIn);
 
-  // Zeilen aufteilen
+  // Split into lines
   std::vector<std::string> lines;
   std::string cur;
   for (char c : raw) {
@@ -47,17 +46,17 @@ bool parseResponse(const std::string& rawIn, const std::string& cmd,
   }
   if (!cur.empty()) lines.push_back(cur);
 
-  std::vector<std::string> messages;   // Einzel-Frames bzw. zusammengesetzte Multi-Frames
+  std::vector<std::string> messages;   // single frames or reassembled multi-frames
   std::string multi;
-  size_t multiLen = 0;                 // angekündigte Länge (z.B. "03E" = 62 Bytes)
+  size_t multiLen = 0;                 // announced length (e.g. "03E" = 62 bytes)
   for (auto& l0 : lines) {
     std::string l = l0;
-    // Leerzeichen am Rand entfernen
+    // Trim surrounding whitespace
     while (!l.empty() && l.front() == ' ') l.erase(l.begin());
     while (!l.empty() && l.back() == ' ') l.pop_back();
     if (l.empty() || l.find("SEARCHING") != std::string::npos || l == "OK") continue;
-    if (l.find("NO DATA") != std::string::npos) { err = T("NO DATA (ECU antwortet nicht – Auto schläft?)", "NO DATA (ECU not responding – car asleep?)"); kind = ERR_NO_DATA; continue; }
-    if (l == "?") { err = T("Befehl vom Dongle nicht verstanden (?)", "Command not understood by dongle (?)"); continue; }
+    if (l.find("NO DATA") != std::string::npos) { err = "NO DATA (ECU not responding – car asleep?)"; kind = ERR_NO_DATA; continue; }
+    if (l == "?") { err = "Command not understood by dongle (?)"; continue; }
     if (l.find("ERROR") != std::string::npos || l.find("UNABLE") != std::string::npos ||
         l.find("STOPPED") != std::string::npos || l.find("BUFFER FULL") != std::string::npos) {
       err = l;
@@ -70,7 +69,7 @@ bool parseResponse(const std::string& rawIn, const std::string& cmd,
       continue;
     }
     std::string h = hexOnly(l);
-    if (h.size() == 3) {           // Längenangabe vor Multi-Frame, z.B. "03E"
+    if (h.size() == 3) {           // length header before a multi-frame, e.g. "03E"
       multiLen = strtoul(h.c_str(), nullptr, 16);
       continue;
     }
@@ -81,37 +80,37 @@ bool parseResponse(const std::string& rawIn, const std::string& cmd,
   std::string prefix = expectedPrefix(cmd);
   for (auto& m : messages) {
     std::string msg = m;
-    // "Response pending" (7F xx 78) vorn abschneiden
+    // Strip leading "Response pending" (7F xx 78)
     while (msg.size() > 6 && msg.compare(0, 2, "7F") == 0 && msg.compare(4, 2, "78") == 0) msg = msg.substr(6);
     if (msg.compare(0, prefix.size(), prefix) != 0) continue;
     for (size_t i = 0; i + 1 < msg.size(); i += 2)
       bytes.push_back((uint8_t)strtoul(msg.substr(i, 2).c_str(), nullptr, 16));
     if (m == multi && multiLen) {
-      if (bytes.size() < multiLen) {   // Folge-Frames fehlen (Timeout im Dongle / BLE)
-        err = std::string(T("Unvollständige Antwort (", "Incomplete response (")) + std::to_string(bytes.size()) +
-              T(" von ", " of ") + std::to_string(multiLen) + " Bytes)";
+      if (bytes.size() < multiLen) {   // consecutive frames missing (timeout in dongle / BLE)
+        err = std::string("Incomplete response (") + std::to_string(bytes.size()) +
+              " of " + std::to_string(multiLen) + " Bytes)";
         lastErrKind = ERR_INCOMPLETE;
         return false;
       }
-      bytes.resize(multiLen);          // Füllbytes (AA) am Ende abschneiden
+      bytes.resize(multiLen);          // strip padding bytes (AA) at the end
     }
     err.clear();
     return true;
   }
   for (auto& m : messages) {
     if (m.size() >= 6 && m.compare(0, 2, "7F") == 0) {
-      err = std::string(T("Negative Antwort, NRC 0x", "Negative response, NRC 0x")) + m.substr(4, 2);
+      err = std::string("Negative response, NRC 0x") + m.substr(4, 2);
       lastErrKind = ERR_NRC;
       return false;
     }
   }
-  if (err.empty()) err = messages.empty() ? std::string(T("Leere Antwort", "Empty response"))
-                                         : std::string(T("Unerwartete Antwort: ", "Unexpected response: ")) + messages[0].substr(0, 40);
+  if (err.empty()) err = messages.empty() ? std::string("Empty response")
+                                         : std::string("Unexpected response: ") + messages[0].substr(0, 40);
   lastErrKind = kind;
   return false;
 }
 
-// ---------- Formeln ----------
+// ---------- Formulas ----------
 
 static double fnU16(double hi, double lo) { return (double)(((unsigned)hi & 0xFF) << 8 | ((unsigned)lo & 0xFF)); }
 static double fnS16(double hi, double lo) { return (double)(int16_t)(((unsigned)hi & 0xFF) << 8 | ((unsigned)lo & 0xFF)); }
@@ -123,7 +122,7 @@ static double fnMin(double a, double b) { return a < b ? a : b; }
 static double fnMax(double a, double b) { return a > b ? a : b; }
 
 static double gCap = 0, gCons = 0;
-static std::vector<std::pair<std::string, double>> gExt;   // Werte anderer PIDs (id → letzter Wert)
+static std::vector<std::pair<std::string, double>> gExt;   // values of other PIDs (id → last value)
 void setValues(const std::vector<std::pair<std::string, double>>& v) { gExt = v; }
 
 static bool isIdent(const std::string& s) {
@@ -131,7 +130,7 @@ static bool isIdent(const std::string& s) {
   for (char c : s) if (!(isalnum((unsigned char)c) || c == '_')) return false;
   return true;
 }
-// Kommt der Bezeichner als ganzes Wort in der Formel vor?
+// Does the identifier occur as a whole word in the formula?
 static bool usesIdent(const std::string& f, const std::string& id) {
   size_t p = 0;
   while ((p = f.find(id, p)) != std::string::npos) {
@@ -180,14 +179,14 @@ bool evalFormula(const std::string& formula, const std::vector<uint8_t>& bytes,
     vals[i] = bytes[i];
     vars.push_back({names[i].c_str(), &vals[i], TE_VARIABLE, nullptr});
   }
-  // Werte anderer PIDs, z. B. "hv_voltage" (für Größen aus zwei Antworten wie Ladeleistung)
+  // Values of other PIDs, e.g. "hv_voltage" (for quantities derived from two responses, such as charging power)
   std::vector<double> ext(gExt.size());
   for (size_t i = 0; i < gExt.size(); i++) {
     const std::string& id = gExt[i].first;
     if (!isIdent(id) || reserved(id)) continue;
     ext[i] = gExt[i].second;
     if (std::isnan(ext[i]) && usesIdent(formula, id)) {
-      err = std::string(T("Wert '", "Value '")) + id + T("' liegt noch nicht vor", "' not available yet");
+      err = std::string("Value '") + id + "' not available yet";
       return false;
     }
     vars.push_back({id.c_str(), &ext[i], TE_VARIABLE, nullptr});
@@ -195,14 +194,14 @@ bool evalFormula(const std::string& formula, const std::vector<uint8_t>& bytes,
   int pos = 0;
   te_expr* e = te_compile(formula.c_str(), vars.data(), (int)vars.size(), &pos);
   if (!e) {
-    err = std::string(T("Formelfehler an Position ", "Formula error at position ")) + std::to_string(pos) +
-          T(" (Byte-Index zu groß? Antwort hat ", " (byte index too large? response has ") + std::to_string(n) + " Bytes: B0..B" +
+    err = std::string("Formula error at position ") + std::to_string(pos) +
+          " (byte index too large? response has " + std::to_string(n) + " Bytes: B0..B" +
           std::to_string(n ? n - 1 : 0) + ")";
     return false;
   }
   value = te_eval(e);
   te_free(e);
-  if (std::isnan(value) || std::isinf(value)) { err = T("Ergebnis ungültig", "Invalid result"); return false; }
+  if (std::isnan(value) || std::isinf(value)) { err = "Invalid result"; return false; }
   if (value == 0) value = 0;   // -0 → 0
   return true;
 }

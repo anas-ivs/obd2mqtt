@@ -2,13 +2,13 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-// Online-Update über GitHub-Releases (github.com/EIBHomeControl/obd2mqtt):
-// prüft das neueste Release, zeigt dessen Änderungen und installiert auf Wunsch die *-esp32-ota.bin.
-// Läuft im Haupt-Task (blockierend, Watchdog wird gefüttert) – Web/MQTT stoßen nur an.
+// Online update via GitHub releases (github.com/anas-ivs/obd2mqtt):
+// checks the latest release, shows its changes and installs the *-esp32-ota.bin on request.
+// Runs in the main task (blocking, watchdog is fed) – web/MQTT only trigger it.
 namespace OnlineUpdate {
-void loop();                         // aus loop(): Anfragen ausführen, tägliche Prüfung
+void loop();                         // from loop(): run requests, daily check
 void requestCheck();
-bool requestInstall();               // false = keine neuere Version bekannt
+bool requestInstall();               // false = no newer version known
 void stateJson(JsonDocument& d);
-void publishMqtt();                  // HA-„update“-Entität: installierte/neueste Version
+void publishMqtt();                  // HA "update" entity: installed/latest version
 }

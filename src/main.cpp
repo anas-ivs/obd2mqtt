@@ -1,11 +1,10 @@
-// OBD2MQTT – ESP32-Bridge: BLE-OBD2-Dongle (ELM327) → MQTT → Home Assistant
+// OBD2MQTT – ESP32 bridge: BLE OBD2 dongle (ELM327) → MQTT → Home Assistant
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <DNSServer.h>
 #include "config.h"
 #include "log.h"
-#include "i18n.h"
 #include "mqtt_ha.h"
 #include "poller.h"
 #include "watchdog.h"
@@ -15,24 +14,24 @@
 static DNSServer dns;
 static bool apActive = false;
 static uint32_t staConnectedSince = 0, staLostSince = 0, staRetryMs = 0;
-static volatile int staDiscReason = -1;   // aus dem WLAN-Ereignis (anderer Task) → in wifiLoop loggen
+static volatile int staDiscReason = -1;   // from the WiFi event (other task) → logged in wifiLoop
 static int staLastRssi = 0;
 static uint32_t staReconnects = 0;
 
 static const char* wifiReasonText(int r) {
   switch (r) {
-    case 2:   return T("Anmeldung abgelaufen", "auth expired");
-    case 3:   return T("vom Router abgemeldet", "deauthenticated by router");
-    case 4:   return T("Zuordnung abgelaufen (Inaktivität)", "association expired (inactivity)");
-    case 8:   return T("Gerät hat sich abgemeldet", "station left");
-    case 15:  return T("Schlüsselaustausch Zeitüberschreitung (Passwort?)", "4-way handshake timeout (password?)");
-    case 200: return T("Beacon-Timeout (Signal zu schwach / Funkstörung)", "beacon timeout (weak signal / interference)");
-    case 201: return T("WLAN nicht gefunden", "network not found");
-    case 202: return T("Anmeldung fehlgeschlagen (Passwort?)", "authentication failed (password?)");
-    case 203: return T("Zuordnung fehlgeschlagen", "association failed");
-    case 204: return T("Handshake-Timeout", "handshake timeout");
-    case 205: return T("Verbindung fehlgeschlagen", "connection failed");
-    default:  return T("sonstiger Grund", "other reason");
+    case 2:   return "auth expired";
+    case 3:   return "deauthenticated by router";
+    case 4:   return "association expired (inactivity)";
+    case 8:   return "station left";
+    case 15:  return "4-way handshake timeout (password?)";
+    case 200: return "beacon timeout (weak signal / interference)";
+    case 201: return "network not found";
+    case 202: return "authentication failed (password?)";
+    case 203: return "association failed";
+    case 204: return "handshake timeout";
+    case 205: return "connection failed";
+    default:  return "other reason";
   }
 }
 
@@ -46,7 +45,7 @@ static void startAP() {
   WiFi.softAP(ssid, "obd2mqtt");
   dns.start(53, "*", WiFi.softAPIP());
   apActive = true;
-  logf(T("Access Point '%s' (Passwort obd2mqtt) → http://%s", "Access point '%s' (password obd2mqtt) → http://%s"), ssid, WiFi.softAPIP().toString().c_str());
+  logf("Access point '%s' (password obd2mqtt) → http://%s", ssid, WiFi.softAPIP().toString().c_str());
 }
 
 static void stopAP() {
@@ -55,21 +54,21 @@ static void stopAP() {
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   apActive = false;
-  logf("%s", T("Access Point beendet", "Access point stopped"));
+  logf("%s", "Access point stopped");
 }
 
-bool g_ipFallback = false;   // feste IP eingestellt, aber DHCP-Fallback aktiv
+bool g_ipFallback = false;   // static IP configured, but DHCP fallback active
 
-// Feste IP aus der Konfiguration anwenden; false = ungültig/abgeschaltet → DHCP
+// Apply static IP from the config; false = invalid/disabled → DHCP
 static bool applyStaticIp() {
   if (cfg.ipMode != "static") return false;
   IPAddress ip, gw, mask, d1, d2;
   if (!ip.fromString(cfg.ipAddr) || !gw.fromString(cfg.ipGw) || !mask.fromString(cfg.ipMask)) {
-    logf("%s", T("Feste IP: Angaben unvollständig/ungültig – verwende DHCP", "Static IP: settings incomplete/invalid – using DHCP"));
+    logf("%s", "Static IP: settings incomplete/invalid – using DHCP");
     return false;
   }
   if (((uint32_t)ip & (uint32_t)mask) != ((uint32_t)gw & (uint32_t)mask)) {
-    logf("%s", T("Feste IP: Gateway liegt nicht im Subnetz – verwende DHCP", "Static IP: gateway not in subnet – using DHCP"));
+    logf("%s", "Static IP: gateway not in subnet – using DHCP");
     return false;
   }
   if (!d1.fromString(cfg.ipDns1)) d1 = gw;
@@ -83,8 +82,8 @@ static bool waitConnected(uint32_t ms) {
   return WiFi.status() == WL_CONNECTED;
 }
 
-// Mit fester IP ist "verbunden" nur die Funkverbindung. Prüfen, ob das Netz wirklich passt:
-// MQTT-Broker per TCP erreichbar (inkl. DNS, falls Hostname). Ohne Broker: kein Test möglich → ok.
+// With a static IP, "connected" only means the radio link. Check that the network actually works:
+// MQTT broker reachable via TCP (incl. DNS if a hostname). No broker: no test possible → ok.
 static bool networkWorks() {
   if (cfg.mqttHost.isEmpty()) return true;
   for (int i = 0; i < 3; i++) {
@@ -105,12 +104,12 @@ static void wifiBegin() {
                ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   bool useStatic = applyStaticIp();
   WiFi.begin(cfg.wifiSsid.c_str(), cfg.wifiPass.c_str());
-  logf(T("Verbinde mit WLAN '%s' (%s)…", "Connecting to WiFi '%s' (%s)…"), cfg.wifiSsid.c_str(),
-       useStatic ? (String(T("feste IP ", "static IP ")) + cfg.ipAddr).c_str() : "DHCP");
+  logf("Connecting to WiFi '%s' (%s)…", cfg.wifiSsid.c_str(),
+       useStatic ? (String("static IP ") + cfg.ipAddr).c_str() : "DHCP");
   bool ok = waitConnected(20000);
   if (useStatic && (!ok || !networkWorks())) {
-    logf(T("Feste IP %s funktioniert nicht (%s) – Fallback auf DHCP", "Static IP %s does not work (%s) – falling back to DHCP"),
-         cfg.ipAddr.c_str(), ok ? T("MQTT-Broker nicht erreichbar", "MQTT broker not reachable") : T("keine WLAN-Verbindung", "no WiFi connection"));
+    logf("Static IP %s does not work (%s) – falling back to DHCP",
+         cfg.ipAddr.c_str(), ok ? "MQTT broker not reachable" : "no WiFi connection");
     g_ipFallback = true;
     WiFi.disconnect(false, false);
     delay(200);
@@ -119,11 +118,11 @@ static void wifiBegin() {
     ok = waitConnected(20000);
   }
   if (ok) {
-    logf(T("WLAN verbunden, IP %s%s", "WiFi connected, IP %s%s"), WiFi.localIP().toString().c_str(),
-         g_ipFallback ? T(" (DHCP-Fallback)", " (DHCP fallback)") : (useStatic ? T(" (fest)", " (static)") : " (DHCP)"));
+    logf("WiFi connected, IP %s%s", WiFi.localIP().toString().c_str(),
+         g_ipFallback ? " (DHCP fallback)" : (useStatic ? " (static)" : " (DHCP)"));
     staConnectedSince = millis();
   } else {
-    logf("%s", T("WLAN nicht erreichbar – starte Setup-AP", "WiFi not reachable – starting setup AP"));
+    logf("%s", "WiFi not reachable – starting setup AP");
     startAP();
   }
 }
@@ -136,8 +135,8 @@ static void wifiLoop() {
   int dr = staDiscReason;
   if (dr >= 0) {
     staDiscReason = -1;
-    if (staConnectedSince || !staLostSince)   // nur den ersten Abriss melden, nicht jeden gescheiterten Versuch
-      logf(T("WLAN getrennt (Grund %d: %s, letztes Signal %d dBm)", "WiFi disconnected (reason %d: %s, last signal %d dBm)"),
+    if (staConnectedSince || !staLostSince)   // only report the first drop, not every failed attempt
+      logf("WiFi disconnected (reason %d: %s, last signal %d dBm)",
            dr, wifiReasonText(dr), staLastRssi);
   }
   if (up) {
@@ -146,15 +145,15 @@ static void wifiLoop() {
     if (now - lastRssiMs > 10000) { lastRssiMs = now; staLastRssi = WiFi.RSSI(); }
     if (!staConnectedSince) {
       staConnectedSince = now;
-      logf(T("WLAN verbunden, IP %s, Signal %d dBm", "WiFi connected, IP %s, signal %d dBm"), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+      logf("WiFi connected, IP %s, signal %d dBm", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
     }
-    // AP abschalten, wenn STA stabil läuft und niemand am AP hängt
+    // shut down the AP once STA is stable and no one is connected to the AP
     if (apActive && now - staConnectedSince > 120000 && WiFi.softAPgetStationNum() == 0) stopAP();
   } else {
     staConnectedSince = 0;
     if (!staLostSince) { staLostSince = now; staRetryMs = now; }
-    // Das automatische Wiederverbinden des ESP32-Cores bleibt bei manchen Trenngründen (z. B. FritzBox)
-    // hängen → alle 30 s selbst neu verbinden
+    // The ESP32 core's auto-reconnect gets stuck for some disconnect reasons (e.g. FritzBox)
+    // → reconnect ourselves every 30 s
     if (now - staRetryMs > 30000) {
       staRetryMs = now;
       staReconnects++;
@@ -162,10 +161,10 @@ static void wifiLoop() {
       delay(100);
       WiFi.begin(cfg.wifiSsid.c_str(), cfg.wifiPass.c_str());
       if (staReconnects % 10 == 1)
-        logf(T("WLAN: neuer Verbindungsversuch (seit %lus getrennt)", "WiFi: reconnect attempt (disconnected for %lus)"),
+        logf("WiFi: reconnect attempt (disconnected for %lus)",
              (unsigned long)((now - staLostSince) / 1000));
     }
-    if (!apActive && now - staLostSince > 180000) startAP();   // 3 min ohne WLAN → Setup-AP
+    if (!apActive && now - staLostSince > 180000) startAP();   // 3 min without WiFi → setup AP
   }
 }
 
@@ -174,14 +173,14 @@ void setup() {
   delay(200);
   bool fsOk = fsBegin();
   bool cfgOk = loadConfig();
-  // Zeitzone sofort setzen: nach einem Software-Neustart läuft die Uhr weiter, Log-Zeilen sollen gleich Ortszeit haben
+  // Set the time zone right away: the clock keeps running after a software restart, log lines should show local time immediately
   timeInit(cfg.tz.c_str());
   logf("OBD2MQTT %s start", FW_VERSION);
   if (!fsOk) logf("LittleFS error!");
   Watchdog::begin();
   logBootCheck(Watchdog::crashCount());
-  migrateProfiles();   // nach loadConfig, damit die Sprache für Auswahllisten stimmt
-  if (!cfgOk) logf("%s", T("Keine Konfiguration – Standardwerte", "No configuration – using defaults"));
+  migrateProfiles();
+  if (!cfgOk) logf("%s", "No configuration – using defaults");
   logSetPersist(cfg.logPersist);
   configTzTime(cfg.tz.c_str(), cfg.ntpServer.c_str(), "time.cloudflare.com");
 

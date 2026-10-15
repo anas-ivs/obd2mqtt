@@ -1,4 +1,4 @@
-# PlatformIO extra_script: kopiert nach dem Build die Firmware mit Versionsnummer nach firmware/
+# PlatformIO extra_script: after the build, copies the firmware with version number to firmware/
 #   firmware/obd2mqtt-v<VERSION>-<env>-ota.bin
 import os, re, shutil
 Import("env")
@@ -15,6 +15,6 @@ def copy_fw(source, target, env):
     os.makedirs(out, exist_ok=True)
     dst = os.path.join(out, "obd2mqtt-v%s-%s-ota.bin" % (version(), env.subst("$PIOENV")))
     shutil.copyfile(str(target[0]), dst)
-    print("Firmware kopiert nach", dst)
+    print("Firmware copied to", dst)
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", copy_fw)
