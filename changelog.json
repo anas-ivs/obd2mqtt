@@ -1,5 +1,17 @@
 [
  {
+  "v": "0.4.0",
+  "en": [
+   "English only: web interface, manual, log messages, Home Assistant names and factory profile; language switch removed. Manual now at /help (/hilfe redirects)",
+   "Only the Hyundai IONIQ 5 / Kia EV6 profile is included (XPeng profiles removed); startup repair of old profiles removed",
+   "New: tyre pressure (bar) and temperature for all four tyres (TPMS 7A0 / 22C00B)",
+   "Faster web interface: pages sent gzip-compressed and cached (304), log only fetched when it changes, lighter status polling, polling paused in hidden browser tabs",
+   "Test and Terminal now run between values of a poll cycle instead of waiting for the whole cycle",
+   "Less load in the main loop: BLE signal read every 2 s, file system usage cached, log written to flash in batches",
+   "Online update checks github.com/anas-ivs/obd2mqtt; default time zone Malaysia (MYT-8)"
+  ]
+ },
+ {
   "v": "0.3.23",
   "en": [
    "New: online update (System → Online update) – checks the latest release on GitHub, shows the changes since the installed version and installs the *-esp32-ota.bin directly from the internet at the push of a button (encrypted connection with certificate check, size and image check, then restart)",
