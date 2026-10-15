@@ -9,6 +9,7 @@ static std::mutex fmtx;               // serializes all access to the log files 
 static std::deque<String> lines;      // RAM ring buffer
 static std::deque<String> pending;    // not yet written to the file
 static const size_t MAX_LINES = 200;
+static volatile uint32_t seq = 0;      // bumped on every change of `lines`
 static const size_t MAX_FILE = 16 * 1024;     // per file; together max. ~32 KB of 128 KB LittleFS
 static const float FS_MAX_USE = 0.70f;          // above this, log files are sacrificed, never profiles/config
 static bool persist = true;
@@ -109,11 +110,14 @@ void logf(const char* fmt, ...) {
   std::lock_guard<std::mutex> lk(mtx);
   lines.push_back(line);
   while (lines.size() > MAX_LINES) lines.pop_front();
+  seq++;
   if (persist) {
     pending.push_back(line);
     while (pending.size() > MAX_LINES) pending.pop_front();
   }
 }
+
+uint32_t logSeq() { return seq; }
 
 void logToJson(JsonArray arr, size_t maxLines) {
   std::lock_guard<std::mutex> lk(mtx);
@@ -143,6 +147,11 @@ static void ensureSpace(size_t need) {
   auto tooFull = [&]() { return LittleFS.usedBytes() + need + 8192 > (size_t)(total * FS_MAX_USE); };
   if (tooFull() && LittleFS.exists(LOG_OLD)) LittleFS.remove(LOG_OLD);
   if (tooFull() && LittleFS.exists(LOG_FILE)) LittleFS.remove(LOG_FILE);
+}
+
+size_t logPendingCount() {
+  std::lock_guard<std::mutex> lk(mtx);
+  return pending.size();
 }
 
 void logFlush() {
@@ -230,6 +239,7 @@ void logClear() {
     std::lock_guard<std::mutex> lk(mtx);
     lines.clear();
     pending.clear();
+    seq++;
   }
   std::lock_guard<std::mutex> fl(fmtx);
   LittleFS.remove(LOG_FILE);

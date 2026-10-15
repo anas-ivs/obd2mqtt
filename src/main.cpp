@@ -209,7 +209,12 @@ void loop() {
 
   timeLoop(cfg.ntpServer.c_str());
   static uint32_t lastFlush = 0;
-  if (millis() - lastFlush > 5000) { lastFlush = millis(); Watchdog::step("Log"); logFlush(); }
+  // Batch flash writes: every 30 s, or sooner once 20 lines are waiting (fewer blocking writes in the loop).
+  // During the first minute every 5 s as before, so boot messages survive a crash loop.
+  uint32_t flushEvery = millis() < 60000 ? 5000 : 30000;
+  if (millis() - lastFlush > flushEvery || (millis() - lastFlush > 2000 && logPendingCount() >= 20)) {
+    lastFlush = millis(); Watchdog::step("Log"); logFlush();
+  }
   Watchdog::step(nullptr);
   delay(10);
 }

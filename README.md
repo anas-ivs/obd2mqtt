@@ -180,6 +180,7 @@ src/obd_parse.*         response parser (single/multi-frame) and formula evaluat
 src/poller.*            poll scheduler, 12 V protection, jobs from the web UI
 src/mqtt_ha.*           MQTT and Home Assistant discovery
 src/web.*, web_ui.h     REST API and web interface
+scripts/gen_web_assets.py  gzips web_ui.h / help_ui.h into src/web_assets.h before each build
 src/help_ui.h           built-in manual
 src/config.*            configuration and profiles (LittleFS)
 src/default_profiles.h  factory profiles IONIQ 5, G6, G9, P7+

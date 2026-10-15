@@ -5,13 +5,13 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <memory>
+#include <utility>
 #include <vector>
 #include "config.h"
 #include "log.h"
 #include "poller.h"
 #include "online_update.h"
-#include "web_ui.h"
-#include "help_ui.h"
+#include "web_assets.h"   // generated from web_ui.h / help_ui.h by scripts/gen_web_assets.py
 #include "watchdog.h"
 
 namespace Web {
@@ -61,20 +61,40 @@ static void postJson(const char* path, ArRequestHandlerFunction fn) {
   server.on(path, HTTP_POST, fn, nullptr, collectBody);
 }
 
+// Static page from flash, gzip-compressed. The browser revalidates with If-None-Match on every
+// load (no-cache); an unchanged page is answered with 304 and no body.
+static void sendPage(AsyncWebServerRequest* r, const uint8_t* gz, size_t len, const char* etag) {
+  const AsyncWebHeader* inm = r->getHeader("If-None-Match");
+  if (inm && inm->value() == etag) {
+    AsyncWebServerResponse* res = r->beginResponse(304);
+    res->addHeader("ETag", etag);
+    res->addHeader("Cache-Control", "no-cache");
+    r->send(res);
+    return;
+  }
+  AsyncWebServerResponse* res = r->beginResponse(200, "text/html", gz, len);
+  res->addHeader("Content-Encoding", "gzip");
+  res->addHeader("ETag", etag);
+  res->addHeader("Cache-Control", "no-cache");
+  r->send(res);
+}
+
+// Profile display names for /api/profiles – reading every profile file on each call is slow,
+// so they are cached until a profile is saved, deleted or restored (all handlers run in the web task)
+static std::vector<std::pair<String, String>> profileNames;
+static bool profileNamesValid = false;
+static void invalidateProfileNames() { profileNamesValid = false; }
+
 void begin() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (!auth(r)) return;
-    AsyncWebServerResponse* res = r->beginResponse(200, "text/html", (const uint8_t*)INDEX_HTML, strlen_P(INDEX_HTML));
-    res->addHeader("Cache-Control", "no-cache");
-    r->send(res);
+    sendPage(r, INDEX_HTML_GZ, sizeof(INDEX_HTML_GZ), INDEX_HTML_ETAG);
   });
 
   // User manual (stored in flash)
   server.on("/help", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (!auth(r)) return;
-    AsyncWebServerResponse* res = r->beginResponse(200, "text/html", (const uint8_t*)HELP_HTML, strlen_P(HELP_HTML));
-    res->addHeader("Cache-Control", "no-cache");
-    r->send(res);
+    sendPage(r, HELP_HTML_GZ, sizeof(HELP_HTML_GZ), HELP_HTML_ETAG);
   });
   server.on("/hilfe", HTTP_GET, [](AsyncWebServerRequest* r) { r->redirect("/help"); });   // old bookmark
 
@@ -84,6 +104,16 @@ void begin() {
     Poller::statusJson(d);
     d["reset_reason"] = Watchdog::resetReason();
     d["safe_mode"] = Watchdog::safeMode();
+    sendJson(r, d);
+  });
+
+  // Last 60 log lines; the UI calls this only when log_seq in /api/status changed
+  server.on("/api/logtail", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!auth(r)) return;
+    JsonDocument d;
+    d["seq"] = logSeq();
+    JsonArray lg = d["lines"].to<JsonArray>();
+    logToJson(lg);
     sendJson(r, d);
   });
 
@@ -114,15 +144,24 @@ void begin() {
       std::lock_guard<std::mutex> lk(Poller::mutex());
       d["active"] = cfg.profile;
     }
+    if (!profileNamesValid) {
+      profileNames.clear();
+      JsonDocument filter;
+      filter["name"] = true;
+      for (auto& n : listProfiles()) {
+        JsonDocument p;   // only read the display name
+        String nm;
+        if (!deserializeJson(p, readProfileRaw(n), DeserializationOption::Filter(filter)) && p["name"].is<const char*>())
+          nm = p["name"].as<String>();
+        profileNames.emplace_back(n, nm);
+      }
+      profileNamesValid = true;
+    }
     JsonArray a = d["list"].to<JsonArray>();
     JsonObject names = d["names"].to<JsonObject>();
-    JsonDocument filter;
-    filter["name"] = true;
-    for (auto& n : listProfiles()) {
-      a.add(n);
-      JsonDocument p;   // only read the display name
-      if (!deserializeJson(p, readProfileRaw(n), DeserializationOption::Filter(filter)) && p["name"].is<const char*>())
-        names[n] = p["name"];
+    for (auto& pn : profileNames) {
+      a.add(pn.first);
+      if (pn.second.length()) names[pn.first] = pn.second;
     }
     sendJson(r, d);
   });
@@ -140,6 +179,7 @@ void begin() {
     String name = r->hasParam("name") ? r->getParam("name")->value() : "";
     String err;
     if (!saveProfileRaw(name, body(r), err)) return sendMsg(r, false, err);
+    invalidateProfileNames();
     bool active;
     {
       std::lock_guard<std::mutex> lk(Poller::mutex());
@@ -159,6 +199,7 @@ void begin() {
       active = (name == cfg.profile);
     }
     if (active) return sendMsg(r, false, "The active profile cannot be deleted");
+    invalidateProfileNames();
     if (!validProfileName(name) || !LittleFS.remove("/profiles/" + name + ".json"))
       return sendMsg(r, false, "Delete failed");
     sendMsg(r, true, "Deleted");
@@ -167,6 +208,7 @@ void begin() {
   server.on("/api/profile-defaults", HTTP_POST, [](AsyncWebServerRequest* r) {
     if (!auth(r)) return;
     installDefaultProfiles(true);
+    invalidateProfileNames();
     Poller::requestProfileReload();
     sendMsg(r, true, "Factory profiles restored");
   });
@@ -354,6 +396,7 @@ void begin() {
         if (saveProfileRaw(kv.key().c_str(), js, err)) okP++;
         else errs += String(kv.key().c_str()) + ": " + err + "; ";
       }
+      invalidateProfileNames();
     }
     bool cfgDone = false;
     if (doCfg && d["config"].is<JsonObject>()) {

@@ -5,10 +5,12 @@
 // Thread-safe log: ring buffer (RAM) + optionally persisted in flash (/log.txt, rotated to /log.old.txt)
 void logf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void logToJson(JsonArray arr, size_t maxLines = 60);
+uint32_t logSeq();                 // changes whenever the RAM log changes (new line / clear)
 String logText();                 // entire RAM buffer as text
 void logSetPersist(bool on);
 bool logPersist();
 void logFlush();                  // write pending lines to the file (from loop())
+size_t logPendingCount();         // lines not yet written to the file
 void logClear();
 bool logReadFile(bool old, String& out);
 size_t logReadChunk(bool old, size_t offset, uint8_t* buf, size_t maxLen);   // read in chunks (low RAM)

@@ -39,6 +39,7 @@ static uint32_t pollCycles = 0;
 static String elmVersion, cacheName, cacheKind, cacheUuids;
 static bool cacheBle = false, cacheMqtt = false;   // for the web task (no BLE calls there)
 static int cacheRssi = 0;
+static size_t cacheFsUsed = 0, cacheFsTotal = 0;   // LittleFS.usedBytes() walks the FS → refreshed once a minute
 
 // Flags from the web task
 static volatile bool flagProfileReload = false;
@@ -56,6 +57,7 @@ struct Job {
 };
 static Job job;
 static uint32_t lastJobMs = 0;      // keep connection for another 60 s after test/terminal
+static void runJob(bool quickOnly = false);   // defined further down, also called between PIDs
 
 // ---------------------------------------------------------------
 
@@ -463,6 +465,7 @@ static void pollDue() {
       anyErr = true;
     }
     if (!ElmBle::connected()) { elmReady = false; break; }
+    runJob(true);   // don't make Test/Terminal wait for the whole cycle
   }
   pollCycles++;
   // Cycle without errors → reset "last error" (otherwise an old error would stay forever)
@@ -648,11 +651,13 @@ static String diagReport() {
   return o;
 }
 
-static void runJob() {
+static void runJob(bool quickOnly) {
   Job j;
   {
     std::lock_guard<std::mutex> lk(mtx);
     if (job.state != "pending") return;
+    // between PIDs only terminal/test jobs; scan and diagnostics would tear down the connection
+    if (quickOnly && (job.type == JOB_SCAN || job.type == JOB_DIAG)) return;
     job.state = "running";
     j = job;
   }
@@ -822,15 +827,20 @@ void begin(bool bleEnabled) {
 
 static void updateCache() {
   bool b = ElmBle::connected();
-  int r = b ? ElmBle::rssi() : 0;
   bool m = MqttHa::connected();
-  static uint32_t lastInfo = 0;
-  bool info = millis() - lastInfo > 2000;   // copy texts only occasionally
+  static uint32_t lastInfo = 0, lastFs = 0;
+  bool info = !lastInfo || millis() - lastInfo > 2000;   // RSSI (controller round trip) and texts only every 2 s
+  bool fs = !lastFs || millis() - lastFs > 60000;
+  int r = 0;
   String nm, kd, uu;
-  if (info) { lastInfo = millis(); nm = ElmBle::deviceName(); kd = ElmBle::dongleKind(); uu = ElmBle::detectedUuids(); }
+  if (info) { lastInfo = millis(); r = b ? ElmBle::rssi() : 0; nm = ElmBle::deviceName(); kd = ElmBle::dongleKind(); uu = ElmBle::detectedUuids(); }
+  size_t fu = 0, ft = 0;
+  if (fs) { lastFs = millis(); fu = LittleFS.usedBytes(); ft = LittleFS.totalBytes(); }
   std::lock_guard<std::mutex> lk(mtx);
-  cacheBle = b; cacheRssi = r; cacheMqtt = m;
-  if (info) { cacheName = nm; cacheKind = kd; cacheUuids = uu; }
+  cacheBle = b; cacheMqtt = m;
+  if (!b) cacheRssi = 0;
+  if (info) { cacheRssi = r; cacheName = nm; cacheKind = kd; cacheUuids = uu; }
+  if (fs) { cacheFsUsed = fu; cacheFsTotal = ft; }
 }
 
 static volatile bool paused = false;
@@ -890,15 +900,14 @@ void loop() {
 }
 
 void statusJson(JsonDocument& d) {
-  std::lock_guard<std::mutex> lk(mtx);
+  // Everything that doesn't touch poller state is collected before taking the lock,
+  // so the web task holds the mutex only for the short state copy
   uint32_t now = millis();
   d["fw"] = FW_VERSION;
   d["uptime"] = now / 1000;
   d["heap"] = ESP.getFreeHeap();
   d["heap_min"] = ESP.getMinFreeHeap();
   d["heap_block"] = ESP.getMaxAllocHeap();
-  d["fs_used"] = LittleFS.usedBytes();
-  d["fs_total"] = LittleFS.totalBytes();
   d["wifi"]["connected"] = WiFi.status() == WL_CONNECTED;
   d["wifi"]["ssid"] = WiFi.SSID();
   d["wifi"]["ip"] = WiFi.localIP().toString();
@@ -906,6 +915,22 @@ void statusJson(JsonDocument& d) {
   d["wifi"]["gw"] = WiFi.gatewayIP().toString();
   d["wifi"]["mask"] = WiFi.subnetMask().toString();
   d["wifi"]["dns"] = WiFi.dnsIP(0).toString();
+  d["hang_step"] = Watchdog::hangStep();
+  d["ble"]["slow_params"] = ElmBle::relaxedParams();
+  d["ble"]["drops"] = ElmBle::dropCount();
+  if (timeValid()) {
+    time_t tnow = time(nullptr);
+    struct tm tmv;
+    localtime_r(&tnow, &tmv);
+    char tb[32];
+    strftime(tb, sizeof(tb), "%d.%m.%Y %H:%M:%S %Z", &tmv);
+    d["time"] = tb;
+  }
+  d["log_seq"] = logSeq();   // the UI fetches /api/logtail only when this changes
+
+  std::lock_guard<std::mutex> lk(mtx);
+  d["fs_used"] = cacheFsUsed;
+  d["fs_total"] = cacheFsTotal;
   d["wifi"]["ip_mode"] = g_ipFallback ? "fallback" : cfg.ipMode;
   d["mqtt"] = cacheMqtt;
   d["ble"]["connected"] = cacheBle;
@@ -915,17 +940,6 @@ void statusJson(JsonDocument& d) {
   d["ble"]["name"] = cacheName;
   d["ble"]["kind"] = cacheKind;
   d["ble"]["elm"] = elmVersion;
-  d["ble"]["slow_params"] = ElmBle::relaxedParams();
-  d["ble"]["drops"] = ElmBle::dropCount();
-  d["hang_step"] = Watchdog::hangStep();
-  if (timeValid()) {
-    time_t tnow = time(nullptr);
-    struct tm tmv;
-    localtime_r(&tnow, &tmv);
-    char tb[32];
-    strftime(tb, sizeof(tb), "%d.%m.%Y %H:%M:%S %Z", &tmv);
-    d["time"] = tb;
-  }
   d["ble"]["last_ok_s"] = lastConnectOk ? (int32_t)((now - lastConnectOk) / 1000) : -1;
   d["ble"]["next_try_s"] = (int32_t)(nextConnectTry - now) > 0 ? (int32_t)((nextConnectTry - now) / 1000) : 0;
   if (!isnan(lastVoltage)) d["voltage"] = lastVoltage;
@@ -950,8 +964,6 @@ void statusJson(JsonDocument& d) {
     } else o["next_s"] = 0;
     o["error"] = s.err;
   }
-  JsonArray lg = d["log"].to<JsonArray>();
-  logToJson(lg);
 }
 
 }  // namespace Poller
