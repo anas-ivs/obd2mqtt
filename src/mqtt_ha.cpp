@@ -92,7 +92,7 @@ void publishProfile(int car) {
 static const char* const FIXED[][2] = {   // fixed per-car entities: component, object id
   {"sensor", "voltage_12v"}, {"binary_sensor", "car"}, {"binary_sensor", "car_awake"},
   {"binary_sensor", "battery_low"}, {"switch", "polling"}, {"sensor", "ble_rssi"},
-  {"sensor", "last_error"}, {"sensor", "profile"}};
+  {"sensor", "last_error"}, {"sensor", "profile"}, {"sensor", "last_data"}};
 
 static void removeCar(int car) {
   for (auto& id : announced[car]) removeConfig(car, "sensor", id);
@@ -182,6 +182,14 @@ static size_t sendCarDiscovery(int car) {
     d["device_class"] = "signal_strength";
     d["entity_category"] = "diagnostic";
     publishConfig(car, "sensor", "ble_rssi", d);
+  }
+  { // Last data: time of the last successful poll (retained; not touched by bridge restarts)
+    JsonDocument d;
+    d["name"] = "Last data";
+    d["state_topic"] = carTopic(car, "last_data");
+    d["device_class"] = "timestamp";
+    d["icon"] = "mdi:clock-check-outline";
+    publishConfig(car, "sensor", "last_data", d);
   }
   { // Last error – publish current state immediately (overwrites old retained value)
     String le = Poller::lastErrorText(car);

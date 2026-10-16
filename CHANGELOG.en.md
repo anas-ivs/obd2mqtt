@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+- New Home Assistant sensor “Last data” per car: time of the last poll that delivered values. Bridge restarts no longer look like fresh data
+- Status card shows “last data: … ago” per car
+- If the first query of a cycle answers NO DATA (car asleep), the other queries (odometer, tyres …) are skipped, so they don't keep the car awake
+
 ## 0.6.0
 - New: find the dongle by its Bluetooth name (Settings → Cars → Find dongle by) – for dongles whose MAC changes on every power-up, e.g. vLinker MC+. The bridge tries the last address first and only scans (approx. 4 s) when the dongle has a new address
 - Dongle scan: picking a dongle with a random address switches that car to “find by name” automatically

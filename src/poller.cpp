@@ -37,6 +37,7 @@ struct Car {
   bool forcePoll = false;             // "Poll now" bypasses sleep mode once
   String lastError;
   uint32_t lastConnectOk = 0;
+  uint32_t lastDataMs = 0;            // millis() of the last cycle with at least one valid value
   bool needWarmup = false;            // after connect/init: send 3E00 once before the first long query
   bool unreachLogged = false;         // log "dongle sleeps with the car" only once
   uint32_t pollCycles = 0;
@@ -463,6 +464,7 @@ static void pollDue() {
   std::vector<uint8_t> bytes;
   String raw, qerr;
   bool qok = false, anyOk = false, anyTried = false, anyReply = false, anyErr = false;
+  bool firstQuery = true, stopCycle = false;
   for (size_t i = 0; i < profile.pids.size(); i++) {
     if (!isDue(*C, i, now)) continue;
     const PidDef& p = profile.pids[i];
@@ -474,6 +476,10 @@ static void pollDue() {
       Watchdog::step("Poller");
       // car responded (even if incomplete/negative) → it's awake, no sleep pause
       if (qok || lastQueryKind == ObdParse::ERR_INCOMPLETE || lastQueryKind == ObdParse::ERR_NRC) anyReply = true;
+      // First query of the cycle answers NO DATA (e.g. the battery management of a sleeping car):
+      // don't query the other ECUs (odometer, tyres …) – their answers could keep the car awake
+      if (firstQuery && !qok && lastQueryKind == ObdParse::ERR_NO_DATA) stopCycle = true;
+      firstQuery = false;
       cache[key] = QRes{qok, bytes, raw, qerr};
     } else {
       qok = it->second.ok; bytes = it->second.bytes; raw = it->second.raw; qerr = it->second.err;
@@ -508,10 +514,30 @@ static void pollDue() {
       setError(p.id + ": " + perr);
       anyErr = true;
     }
+    if (stopCycle) {
+      clog("%s: NO DATA – car probably asleep, other queries skipped this cycle", p.id.c_str());
+      break;
+    }
     if (!linkUp()) { C->elmReady = false; break; }
     runJob(true);   // don't make Test/Terminal wait for the whole cycle
   }
   C->pollCycles++;
+  // "Last data": time of the last cycle that delivered at least one valid value (HA timestamp sensor).
+  // Restarts of the bridge don't change it – unlike HA's "last changed" of the values.
+  if (anyOk) {
+    {
+      std::lock_guard<std::mutex> lk(mtx);
+      C->lastDataMs = millis();
+    }
+    if (timeValid()) {
+      time_t tnow = time(nullptr);
+      struct tm tmv;
+      gmtime_r(&tnow, &tmv);
+      char tb[32];
+      strftime(tb, sizeof(tb), "%Y-%m-%dT%H:%M:%S+00:00", &tmv);
+      MqttHa::publishText(C->idx, "last_data", tb);
+    }
+  }
   // Cycle without errors → reset "last error" and always publish
   // (MQTT is retained: otherwise the old error would remain in the broker after a reboot)
   if (anyTried && !anyErr) {
@@ -1044,6 +1070,7 @@ void statusJson(JsonDocument& d) {
     o["ble"]["kind"] = c.cacheKind;
     o["ble"]["elm"] = c.elmVersion;
     o["ble"]["slow_params"] = ElmBle::relaxedParams(cc);
+    o["last_data_s"] = c.lastDataMs ? (int32_t)((now - c.lastDataMs) / 1000) : -1;
     o["ble"]["last_ok_s"] = c.lastConnectOk ? (int32_t)((now - c.lastConnectOk) / 1000) : -1;
     o["ble"]["next_try_s"] = (int32_t)(c.nextConnectTry - now) > 0 ? (int32_t)((c.nextConnectTry - now) / 1000) : 0;
     if (!isnan(c.lastVoltage)) o["voltage"] = c.lastVoltage;
