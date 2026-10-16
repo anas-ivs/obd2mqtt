@@ -4,6 +4,23 @@
 #include <vector>
 
 
+// ---------- Per-car settings (one dongle per car) ----------
+static const int NCARS = 2;
+struct CarConfig {
+  bool enabled = false;                 // car 2 is optional
+  String name;                          // display name in the web UI, e.g. "IONIQ 5"
+  String deviceName;                    // device name in Home Assistant
+  String mqttBase;                      // state topics: <base>/<pid>, e.g. obd2mqtt/car1
+  // BLE dongle
+  String bleMac;                        // AA:BB:CC:DD:EE:FF
+  String bleAddrType = "auto";          // auto | public | random
+  String bleService, bleNotify, bleWrite; // empty = auto-detect
+  String bleName;                       // display name (from scan or dongle)
+  String blePin;                        // BLE passkey for dongles that require pairing (e.g. WiCAN Pro: 123456), empty = none
+  String profile;                       // file /profiles/<name>.json
+  bool pollEnabled = true;              // automatic polling on/off for this car
+};
+
 // ---------- Device configuration (/config.json) ----------
 struct AppConfig {
   // Network
@@ -17,20 +34,12 @@ struct AppConfig {
   String mqttHost;
   uint16_t mqttPort = 1883;
   String mqttUser, mqttPass;
-  String mqttBase = "obd2mqtt";         // State topics: <base>/<pid>
+  String mqttBase = "obd2mqtt";         // bridge topics (status, firmware update): <base>/...
   String haPrefix = "homeassistant";    // Discovery prefix
-  String deviceName = "Auto OBD";       // Device name in Home Assistant
 
-  // BLE dongle
-  String bleMac;                        // AA:BB:CC:DD:EE:FF
-  String bleAddrType = "auto";          // auto | public | random
-  String bleService, bleNotify, bleWrite; // empty = auto-detect
-  String bleName;                       // Display name (from scan or dongle)
-  String blePin;                        // BLE passkey for dongles that require pairing (e.g. WiCAN Pro: 123456), empty = none
+  CarConfig cars[NCARS];                // per-car settings, defaults in config.cpp
 
-  // Polling
-  String profile = "ioniq5";            // File /profiles/<name>.json
-  bool pollEnabled = true;              // Master switch: automatic polling on/off
+  // Polling (shared by both cars)
   float minVoltage = 12.2f;             // 12V protection, 0 = off
   float sleepVoltage = 13.2f;           // below this the car is considered asleep → no CAN queries (0 = off)
   uint32_t sleepPollMin = 0;            // poll anyway while the car sleeps: every N min (0 = never)
@@ -45,6 +54,8 @@ struct AppConfig {
   String tz = "MYT-8";                  // POSIX time zone (Malaysia, UTC+8)
   bool updateCheck = true;              // check GitHub daily for new firmware
   bool logPersist = true;               // store log in flash (survives reboots)
+
+  AppConfig();
 };
 
 // ---------- Vehicle profile (/profiles/<name>.json) ----------
@@ -70,7 +81,7 @@ struct Profile {
 
 extern AppConfig cfg;
 extern bool g_ipFallback;          // static IP failed → DHCP active (main.cpp)
-extern Profile profile;
+extern Profile profiles[NCARS];    // active profile per car
 
 bool fsBegin();
 bool loadConfig();
@@ -78,7 +89,7 @@ bool saveConfig();
 void configToJson(JsonDocument& doc, bool maskSecrets);
 void configFromJson(JsonVariantConst src);   // "********" = leave value unchanged
 
-bool loadProfile(const String& name);
+bool loadProfile(const String& name, Profile& out);
 bool parseProfile(JsonVariantConst src, Profile& out, String& err);
 void profileToJson(const Profile& p, JsonDocument& doc);
 bool saveProfileRaw(const String& name, const String& json, String& err);

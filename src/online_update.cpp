@@ -268,7 +268,7 @@ void publishMqtt() {
   }
   String s;
   serializeJson(d, s);
-  MqttHa::publishText("update", s);
+  MqttHa::publishBridge("update", s);
 }
 
 }  // namespace OnlineUpdate

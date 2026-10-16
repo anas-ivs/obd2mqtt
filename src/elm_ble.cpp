@@ -15,7 +15,10 @@ static NimBLEClient* client = nullptr;
 static NimBLERemoteCharacteristic* chrNotify = nullptr;
 static NimBLERemoteCharacteristic* chrWrite = nullptr;
 static bool writeWithResponse = false;
-static String uuidInfo, devName, nameMac, kind;
+static String uuidInfo, kind;
+static const CarConfig* cur = nullptr;      // dongle settings of the connected (or last) car
+static std::map<String, String> gapNames;  // MAC → name read from the dongle (GAP 0x2A00)
+static std::vector<String> relaxedMacs;    // dongles that need the slower connection parameters
 static volatile uint32_t connectMs = 0;    // time of the last successful connect
 
 static std::mutex rxMutex;
@@ -57,13 +60,13 @@ static void drain(uint32_t quietMs, uint32_t maxMs) {
 class ClientCb : public NimBLEClientCallbacks {
   // Pairing with PIN (e.g. WiCAN Pro: passkey entry, encrypted connection)
   void onPassKeyEntry(NimBLEConnInfo& info) override {
-    if (cfg.blePin.isEmpty()) {
+    if (!cur || cur->blePin.isEmpty()) {
       logf("%s", "Dongle requires a PIN – please enter it under Settings → BLE dongle");
       NimBLEDevice::injectPassKey(info, 0);
       return;
     }
     logf("%s", "Dongle requires PIN – sending stored PIN");
-    NimBLEDevice::injectPassKey(info, (uint32_t)cfg.blePin.toInt());
+    NimBLEDevice::injectPassKey(info, (uint32_t)cur->blePin.toInt());
   }
   void onConfirmPasskey(NimBLEConnInfo& info, uint32_t) override { NimBLEDevice::injectConfirmPasskey(info, true); }
   void onAuthenticationComplete(NimBLEConnInfo& info) override {
@@ -88,7 +91,8 @@ class ClientCb : public NimBLEClientCallbacks {
     // Only count drops shortly after connecting (driving the car away etc. should not trigger the switch)
     if (reason == 0x208 && !relaxed && millis() - connectMs < 60000 && ++fastDrops >= 2) {
       relaxed = true;
-      logf("%s", "Connection dropped repeatedly (0x208) – using slower BLE connection parameters from now on");
+      if (cur) relaxedMacs.push_back(cur->bleMac);
+      logf("%s", "Connection dropped repeatedly (0x208) – using slower BLE connection parameters for this dongle from now on");
     }
   }
 };
@@ -106,8 +110,12 @@ void shutdown() {
 }
 
 bool connected() { return client && client->isConnected(); }
+bool connectedTo(const CarConfig& c) { return connected() && cur == &c; }
 uint32_t dropCount() { return drops; }
-bool relaxedParams() { return relaxed; }
+bool relaxedParams(const CarConfig& c) {
+  for (auto& m : relaxedMacs) if (m == c.bleMac) return true;
+  return false;
+}
 // RSSI right after connecting is often not measured yet (e.g. -128) → 0 = unknown
 int rssi() {
   if (!connected()) return 0;
@@ -116,7 +124,10 @@ int rssi() {
 }
 uint16_t mtu() { return connected() ? client->getMTU() : 0; }
 String detectedUuids() { return uuidInfo; }
-String deviceName() { return devName.length() && nameMac == cfg.bleMac ? devName : cfg.bleName; }
+String deviceName(const CarConfig& c) {
+  auto it = gapNames.find(c.bleMac);
+  return it != gapNames.end() && it->second.length() ? it->second : c.bleName;
+}
 String dongleKind() { return kind; }
 
 void disconnect() {
@@ -138,11 +149,11 @@ static bool isStdService(const NimBLEUUID& u) {
 static bool resolveCharacteristics(String& err) {
   chrNotify = chrWrite = nullptr;
 
-  if (cfg.bleService.length()) {
-    NimBLERemoteService* s = client->getService(NimBLEUUID(cfg.bleService.c_str()));
-    if (!s) { err = "Service " + cfg.bleService + " not found"; return false; }
-    if (cfg.bleNotify.length()) chrNotify = s->getCharacteristic(NimBLEUUID(cfg.bleNotify.c_str()));
-    if (cfg.bleWrite.length()) chrWrite = s->getCharacteristic(NimBLEUUID(cfg.bleWrite.c_str()));
+  if (cur->bleService.length()) {
+    NimBLERemoteService* s = client->getService(NimBLEUUID(cur->bleService.c_str()));
+    if (!s) { err = "Service " + cur->bleService + " not found"; return false; }
+    if (cur->bleNotify.length()) chrNotify = s->getCharacteristic(NimBLEUUID(cur->bleNotify.c_str()));
+    if (cur->bleWrite.length()) chrWrite = s->getCharacteristic(NimBLEUUID(cur->bleWrite.c_str()));
     if (chrNotify && chrWrite) return true;
   }
 
@@ -184,13 +195,16 @@ static bool resolveCharacteristics(String& err) {
   return false;
 }
 
-bool connect(String& err) {
-  if (connected()) return true;
-  if (cfg.bleMac.length() != 17) { err = "No valid BLE MAC configured"; return false; }
-  disconnect();
+bool connect(const CarConfig& car, String& err) {
+  if (connectedTo(car)) return true;
+  disconnect();   // also when the other car's dongle is connected: only one connection at a time
+  if (car.bleMac.length() != 17) { err = "No valid BLE MAC configured"; return false; }
+  if (cur != &car) fastDrops = 0;
+  cur = &car;
+  relaxed = relaxedParams(car);
 
   // Security: with PIN → passkey entry (MITM, Secure Connections, bonding); without PIN → "Just Works"
-  if (cfg.blePin.length()) {
+  if (car.blePin.length()) {
     NimBLEDevice::setSecurityAuth(true, true, true);
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_ONLY);
   } else {
@@ -207,8 +221,8 @@ bool connect(String& err) {
   else client->setConnectionParams(6, 12, 0, 400);
 
   std::vector<uint8_t> types;
-  if (cfg.bleAddrType == "public") types = {BLE_ADDR_PUBLIC};
-  else if (cfg.bleAddrType == "random") types = {BLE_ADDR_RANDOM};
+  if (car.bleAddrType == "public") types = {BLE_ADDR_PUBLIC};
+  else if (car.bleAddrType == "random") types = {BLE_ADDR_RANDOM};
   else types = {BLE_ADDR_PUBLIC, BLE_ADDR_RANDOM};
 
   // Each step blocks for up to 30 s (BLE timeout). To keep the 60 s watchdog from firing:
@@ -232,7 +246,7 @@ bool connect(String& err) {
   bool ok = false;
   for (uint8_t t : types) {
     if (!step("BLE connect")) return fail();
-    NimBLEAddress addr(std::string(cfg.bleMac.c_str()), t);
+    NimBLEAddress addr(std::string(car.bleMac.c_str()), t);
     if (client->connect(addr)) { ok = true; break; }
   }
   if (!ok) { err = "Dongle not reachable (car away / dongle asleep?)"; return fail(); }
@@ -242,7 +256,7 @@ bool connect(String& err) {
   if (!step("BLE services")) return fail();
   if (!resolveCharacteristics(err)) return fail();
 
-  if (!step(cfg.blePin.length() ? "BLE subscribe/pairing" : "BLE subscribe")) return fail();
+  if (!step(car.blePin.length() ? "BLE subscribe/pairing" : "BLE subscribe")) return fail();
   bool sub = chrNotify->canNotify() ? chrNotify->subscribe(true, onNotify)
                                     : chrNotify->subscribe(false, onNotify);
   if (!sub) {
@@ -255,7 +269,7 @@ bool connect(String& err) {
              chrNotify->getUUID().toString().c_str() + " / " + chrWrite->getUUID().toString().c_str();
   // Read the device name from the GAP service (0x1800 / 0x2A00) – not every dongle provides it.
   // Only on the first connect: saves another (blocking) read request on every reconnect.
-  if ((devName.isEmpty() || nameMac != cfg.bleMac) && step("BLE name")) {
+  if (gapNames.find(car.bleMac) == gapNames.end() && step("BLE name")) {
     NimBLEAttValue v = client->getValue(NimBLEUUID((uint16_t)0x1800), NimBLEUUID((uint16_t)0x2A00));
     String n;
     for (size_t i = 0; i < v.length() && i < 40; i++) {
@@ -263,7 +277,7 @@ bool connect(String& err) {
       if (c >= 32 && c < 127) n += c;
     }
     n.trim();
-    if (n.length()) { devName = n; nameMac = cfg.bleMac; }
+    gapNames[car.bleMac] = n;   // empty = dongle has no name; don't ask again
   }
   // Rough type based on the service UUID
   {
@@ -282,7 +296,7 @@ bool connect(String& err) {
     int r = rssi();
     String rs = r ? String(r) + " dBm" : String("not measured yet");
     logf("BLE connected: %s (%s), RSSI %s, MTU %u, UUIDs %s%s",
-         deviceName().length() ? deviceName().c_str() : cfg.bleMac.c_str(), kind.c_str(), rs.c_str(),
+         deviceName(car).length() ? deviceName(car).c_str() : car.bleMac.c_str(), kind.c_str(), rs.c_str(),
          (unsigned)client->getMTU(), uuidInfo.c_str(),
          relaxed ? ", slow connection parameters" : "");
   }
@@ -363,7 +377,8 @@ std::vector<ScanEntry> scan(uint32_t ms) {
       if (it != scanNames.end()) e.name = it->second.c_str();
     }
     // Name still empty (e.g. dongle sends it only rarely): use the known name for the configured dongle
-    if (e.name.isEmpty() && e.mac.equalsIgnoreCase(cfg.bleMac)) e.name = deviceName();
+    for (auto& c : cfg.cars)
+      if (e.name.isEmpty() && e.mac.equalsIgnoreCase(c.bleMac)) e.name = deviceName(c);
     e.rssi = d->getRSSI();
     e.addrRandom = d->getAddress().getType() == BLE_ADDR_RANDOM;
     String n = e.name; n.toUpperCase();

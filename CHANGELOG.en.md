@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+- New: two cars – one dongle per car, each with its own profile, MQTT base topic (default obd2mqtt/car1, obd2mqtt/car2) and Home Assistant device. One BLE connection at a time; the bridge serves whichever car is due
+- Settings → Cars: name, HA device name, base topic, profile and dongle per car; dongle scan with "Use for …" per car
+- Status: one card per car with its own polling switch and Poll now; car selector (top right) for Test, Terminal and diagnostic report
+- Profile: "Use for …" a car instead of Activate; new factory profile Kia EV6 (same E-GMP PIDs as the IONIQ 5)
+- Home Assistant: new "OBD2MQTT Bridge" device with the firmware update; polling switch per car
+- Upgrade from 0.4: existing dongle/profile settings become car 1; topics move to obd2mqtt/car1 – delete the old device in Home Assistant once
+- Firmware upload switches Bluetooth off completely while flashing (as in 0.4.1)
+
 ## 0.4.1
 - Firmware upload (System → Firmware update) switches Bluetooth off completely while flashing – lower current, against brownout restarts during the upload. Interim version to install 0.5
 

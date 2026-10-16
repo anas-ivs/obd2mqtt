@@ -2,10 +2,21 @@
 #include <LittleFS.h>
 #include "default_profiles.h"
 #include "log.h"
-#include "obd_parse.h"
+
+AppConfig::AppConfig() {
+  cars[0].enabled = true;
+  cars[0].name = "IONIQ 5";
+  cars[0].deviceName = "IONIQ 5";
+  cars[0].mqttBase = "obd2mqtt/car1";
+  cars[0].profile = "ioniq5";
+  cars[1].name = "EV6";
+  cars[1].deviceName = "EV6";
+  cars[1].mqttBase = "obd2mqtt/car2";
+  cars[1].profile = "ev6";
+}
 
 AppConfig cfg;
-Profile profile;
+Profile profiles[NCARS];
 const char* MASK = "********";
 
 static const char* CONFIG_FILE = "/config.json";
@@ -53,16 +64,23 @@ void configToJson(JsonDocument& d, bool mask) {
   d["mqtt_pass"] = secret(cfg.mqttPass);
   d["mqtt_base"] = cfg.mqttBase;
   d["ha_prefix"] = cfg.haPrefix;
-  d["device_name"] = cfg.deviceName;
-  d["ble_mac"] = cfg.bleMac;
-  d["ble_addr_type"] = cfg.bleAddrType;
-  d["ble_service"] = cfg.bleService;
-  d["ble_notify"] = cfg.bleNotify;
-  d["ble_write"] = cfg.bleWrite;
-  d["ble_name"] = cfg.bleName;
-  d["ble_pin"] = cfg.blePin;
-  d["profile"] = cfg.profile;
-  d["poll_enabled"] = cfg.pollEnabled;
+  JsonArray cars = d["cars"].to<JsonArray>();
+  for (auto& c : cfg.cars) {
+    JsonObject o = cars.add<JsonObject>();
+    o["enabled"] = c.enabled;
+    o["name"] = c.name;
+    o["device_name"] = c.deviceName;
+    o["mqtt_base"] = c.mqttBase;
+    o["ble_mac"] = c.bleMac;
+    o["ble_addr_type"] = c.bleAddrType;
+    o["ble_service"] = c.bleService;
+    o["ble_notify"] = c.bleNotify;
+    o["ble_write"] = c.bleWrite;
+    o["ble_name"] = c.bleName;
+    o["ble_pin"] = c.blePin;
+    o["profile"] = c.profile;
+    o["poll_enabled"] = c.pollEnabled;
+  }
   d["min_voltage"] = cfg.minVoltage;
   d["sleep_voltage"] = cfg.sleepVoltage;
   d["sleep_poll_min"] = cfg.sleepPollMin;
@@ -75,6 +93,32 @@ void configToJson(JsonDocument& d, bool mask) {
   d["tz"] = cfg.tz;
   d["log_persist"] = cfg.logPersist;
   d["update_check"] = cfg.updateCheck;
+}
+
+// Car settings from a JSON object; only keys that are present are changed
+static void carFromJson(JsonVariantConst s, CarConfig& c) {
+  auto str = [&](const char* k, String& dst) {
+    if (!s[k].is<const char*>()) return;
+    String v = s[k].as<String>();
+    v.trim();
+    dst = v;
+  };
+  if (s["enabled"].is<bool>()) c.enabled = s["enabled"];
+  str("name", c.name);
+  str("device_name", c.deviceName);
+  str("mqtt_base", c.mqttBase);
+  while (c.mqttBase.endsWith("/")) c.mqttBase.remove(c.mqttBase.length() - 1);
+  str("ble_mac", c.bleMac);
+  c.bleMac.toUpperCase();
+  str("ble_addr_type", c.bleAddrType);
+  str("ble_service", c.bleService);
+  str("ble_notify", c.bleNotify);
+  str("ble_write", c.bleWrite);
+  str("ble_name", c.bleName);
+  str("ble_pin", c.blePin);
+  { String d; for (char ch : c.blePin) if (isdigit((unsigned char)ch)) d += ch; c.blePin = d.substring(0, 6); }
+  str("profile", c.profile);
+  if (s["poll_enabled"].is<bool>()) c.pollEnabled = s["poll_enabled"];
 }
 
 void configFromJson(JsonVariantConst s) {
@@ -103,18 +147,20 @@ void configFromJson(JsonVariantConst s) {
   str("mqtt_pass", cfg.mqttPass, true);
   str("mqtt_base", cfg.mqttBase);
   str("ha_prefix", cfg.haPrefix);
-  str("device_name", cfg.deviceName);
-  str("ble_mac", cfg.bleMac);
-  cfg.bleMac.toUpperCase();
-  str("ble_addr_type", cfg.bleAddrType);
-  str("ble_service", cfg.bleService);
-  str("ble_notify", cfg.bleNotify);
-  str("ble_write", cfg.bleWrite);
-  str("ble_name", cfg.bleName);
-  str("ble_pin", cfg.blePin);
-  { String d; for (char c : cfg.blePin) if (isdigit((unsigned char)c)) d += c; cfg.blePin = d.substring(0, 6); }
-  str("profile", cfg.profile);
-  if (s["poll_enabled"].is<bool>()) cfg.pollEnabled = s["poll_enabled"];
+  if (s["cars"].is<JsonArrayConst>()) {
+    // [ {car 1 keys}, {car 2 keys} ] – an entry may be empty/null to leave that car unchanged
+    int i = 0;
+    for (JsonVariantConst c : s["cars"].as<JsonArrayConst>()) {
+      if (i >= NCARS) break;
+      if (c.is<JsonObjectConst>()) carFromJson(c, cfg.cars[i]);
+      i++;
+    }
+  } else if (s["ble_mac"].is<const char*>()) {
+    // Settings from v0.4 or older (one car, flat keys): they become car 1
+    carFromJson(s, cfg.cars[0]);
+    if (s["device_name"].is<const char*>()) cfg.cars[0].name = cfg.cars[0].deviceName;
+    cfg.cars[0].mqttBase = "";   // the old flat "mqtt_base" is the bridge base → car 1 gets <base>/car1 below
+  }
   if (s["min_voltage"].is<float>()) cfg.minVoltage = s["min_voltage"];
   if (s["sleep_voltage"].is<float>()) cfg.sleepVoltage = constrain(s["sleep_voltage"].as<float>(), 0.0f, 16.0f);
   if (s["low_batt_voltage"].is<float>()) cfg.lowBattVoltage = constrain(s["low_batt_voltage"].as<float>(), 0.0f, 15.0f);
@@ -131,6 +177,8 @@ void configFromJson(JsonVariantConst s) {
   if (s["update_check"].is<bool>()) cfg.updateCheck = s["update_check"];
   if (cfg.hostname.isEmpty()) cfg.hostname = "obd2mqtt";
   if (cfg.mqttBase.isEmpty()) cfg.mqttBase = "obd2mqtt";
+  for (int i = 0; i < NCARS; i++)
+    if (cfg.cars[i].mqttBase.isEmpty()) cfg.cars[i].mqttBase = cfg.mqttBase + "/car" + String(i + 1);
   if (cfg.haPrefix.isEmpty()) cfg.haPrefix = "homeassistant";
 }
 
@@ -236,15 +284,13 @@ String readProfileRaw(const String& name) {
   return s;
 }
 
-bool loadProfile(const String& name) {
+bool loadProfile(const String& name, Profile& out) {
   String raw = readProfileRaw(name);
   if (raw.isEmpty()) return false;
   JsonDocument d;
   if (deserializeJson(d, raw)) return false;
   String err;
-  if (!parseProfile(d.as<JsonVariantConst>(), profile, err)) return false;
-  ObdParse::setBattery(profile.batteryKwh, profile.consumption);
-  return true;
+  return parseProfile(d.as<JsonVariantConst>(), out, err);
 }
 
 bool saveProfileRaw(const String& name, const String& json, String& err) {

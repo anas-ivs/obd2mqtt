@@ -3,29 +3,30 @@
 #include <ArduinoJson.h>
 #include <mutex>
 
-// Polling logic: connect BLE, init, poll PIDs cyclically, publish values.
+// Polling logic: connect BLE, init, poll PIDs cyclically, publish values – for up to two cars
+// (index 0/1), one BLE connection at a time.
 // Runs exclusively in the Arduino loop() task; the web UI communicates via jobs/flags.
 namespace Poller {
 
-std::mutex& mutex();          // protects cfg/profile/status between web and loop task
+std::mutex& mutex();          // protects cfg/profiles/status between web and loop task
 
 void begin(bool bleEnabled = true);   // false = safe mode (no BLE polling)
 void loop();
 
 // Calls from the web task
 void requestConfigApply(const String& json);  // applies + saves configuration
-void requestProfileReload();                  // reload active profile
-void requestPollNow();
-String lastErrorText();                       // current "last error" (empty = none)
-void requestEnabled(bool on);                 // main switch (web/MQTT) – saved in loop()
+void requestProfileReload();                  // reload the profiles of both cars
+void requestPollNow(int car = -1);            // -1 = all cars
+String lastErrorText(int car);                // current "last error" of a car (empty = none)
+void requestEnabled(int car, bool on);        // polling switch of a car (web/MQTT) – saved in loop()
 void setPaused(bool p, bool bleOff = false); // e.g. during OTA; bleOff: also switch the Bluetooth stack off
 bool bleStopped();                            // Bluetooth stack off (only a restart turns it back on)
 bool isPaused();
 
 enum JobType { JOB_RAW, JOB_TEST, JOB_SCAN, JOB_DIAG };
-void setDebug(uint32_t minutes);
-size_t diagChunk(size_t offset, uint8_t* buf, size_t maxLen);   // last diagnostic report (text)              // diagnostic log for N minutes (0 = off)
-bool submitJob(JobType t, const String& header, const String& cmd, const String& formula,
+void setDebug(uint32_t minutes);              // diagnostic log for N minutes (0 = off)
+size_t diagChunk(size_t offset, uint8_t* buf, size_t maxLen);   // last diagnostic report (text)
+bool submitJob(JobType t, int car, const String& header, const String& cmd, const String& formula,
                float cap = 0, float cons = 0);   // cap/cons: battery values for the test (0 = active profile)
 void jobJson(JsonDocument& d);                // {state: idle|pending|running|done, result: {...}}
 

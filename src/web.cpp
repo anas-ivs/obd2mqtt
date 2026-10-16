@@ -85,6 +85,16 @@ static std::vector<std::pair<String, String>> profileNames;
 static bool profileNamesValid = false;
 static void invalidateProfileNames() { profileNamesValid = false; }
 
+// Profile in use by an enabled car? (call under Poller::mutex())
+static bool profileInUse(const String& name) {
+  for (auto& c : cfg.cars) if (c.enabled && c.profile == name) return true;
+  return false;
+}
+static int carParam(AsyncWebServerRequest* r, int dflt) {
+  if (!r->hasParam("car")) return dflt;
+  return constrain((int)r->getParam("car")->value().toInt(), 0, NCARS - 1);
+}
+
 void begin() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (!auth(r)) return;
@@ -142,7 +152,8 @@ void begin() {
     JsonDocument d;
     {
       std::lock_guard<std::mutex> lk(Poller::mutex());
-      d["active"] = cfg.profile;
+      JsonArray act = d["active"].to<JsonArray>();   // profile per car ("" = car disabled)
+      for (auto& c : cfg.cars) act.add(c.enabled ? c.profile : String());
     }
     if (!profileNamesValid) {
       profileNames.clear();
@@ -183,7 +194,7 @@ void begin() {
     bool active;
     {
       std::lock_guard<std::mutex> lk(Poller::mutex());
-      active = (name == cfg.profile);
+      active = profileInUse(name);
     }
     if (active) Poller::requestProfileReload();
     logf("Profile '%s' saved", name.c_str());
@@ -196,9 +207,9 @@ void begin() {
     bool active;
     {
       std::lock_guard<std::mutex> lk(Poller::mutex());
-      active = (name == cfg.profile);
+      active = profileInUse(name);
     }
-    if (active) return sendMsg(r, false, "The active profile cannot be deleted");
+    if (active) return sendMsg(r, false, "This profile is used by a car and cannot be deleted");
     invalidateProfileNames();
     if (!validProfileName(name) || !LittleFS.remove("/profiles/" + name + ".json"))
       return sendMsg(r, false, "Delete failed");
@@ -222,7 +233,7 @@ void begin() {
     String cmd = d["cmd"] | "";
     if (jt != Poller::JOB_SCAN && jt != Poller::JOB_DIAG && cmd.isEmpty()) return sendMsg(r, false, "Command missing");
     if (Poller::isPaused()) return sendMsg(r, false, "Not available in safe mode / during an update", 409);
-    if (!Poller::submitJob(jt, d["header"] | "", cmd, d["formula"] | "", d["cap"] | 0.0f, d["cons"] | 0.0f))
+    if (!Poller::submitJob(jt, d["car"] | 0, d["header"] | "", cmd, d["formula"] | "", d["cap"] | 0.0f, d["cons"] | 0.0f))
       return sendMsg(r, false, "Another job is already running", 409);
     sendMsg(r, true, "Started");
   });
@@ -418,7 +429,7 @@ void begin() {
 
   server.on("/api/pollnow", HTTP_POST, [](AsyncWebServerRequest* r) {
     if (!auth(r)) return;
-    Poller::requestPollNow();
+    Poller::requestPollNow(carParam(r, -1));   // no car = all cars
     sendMsg(r, true, "Poll triggered");
   });
 
@@ -442,7 +453,7 @@ void begin() {
   server.on("/api/polling", HTTP_POST, [](AsyncWebServerRequest* r) {
     if (!auth(r)) return;
     bool on = r->hasParam("on") && r->getParam("on")->value() == "1";
-    Poller::requestEnabled(on);
+    Poller::requestEnabled(carParam(r, 0), on);
     sendMsg(r, true, on ? "Polling switched on" : "Polling switched off");
   });
 

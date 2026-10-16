@@ -14,8 +14,9 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 
 ## Features
 
+- **Two cars**: one dongle per car, each with its own profile, MQTT base topic and Home Assistant device (one BLE connection at a time)
 - BLE client for ELM327 dongles (auto-detects common UUIDs: FFF0, FFE0, 18F0, vLinker; can be overridden manually)
-- Vehicle profiles as JSON (pre-installed: Hyundai IONIQ 5 / Kia EV6), editable in the web UI
+- Vehicle profiles as JSON (pre-installed: Hyundai IONIQ 5, Kia EV6), editable in the web UI
 - Web interface and built-in manual (English), backup/restore of all settings, log with real time (NTP)
 - PIDs with freely definable formulas (`B34/2`, `u16(B28,B29)/10`, `s16(..)`, `s8(..)`, `bit(x,n)`)
 - **Test button** per PID: shows every response byte with its index so you can easily find byte positions
@@ -30,7 +31,7 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 ## What you need
 
 - **ESP32 dev board** (classic ESP32, e.g. ESP32-DevKitC V4) with a USB power supply, within BLE range of the car
-- **Bluetooth LE OBD2 dongle**, ELM327-compatible, e.g. vLinker MC+/FS, Veepeak BLE+, OBDLink CX, Vgate iCar Pro BLE or WiCAN Pro (BLE + protocol "elm327", PIN under Settings → BLE dongle). *Classic Bluetooth (SPP) dongles without "LE" do not work.*
+- **Bluetooth LE OBD2 dongle**, ELM327-compatible, e.g. vLinker MC+/FS, Veepeak BLE+, OBDLink CX, Vgate iCar Pro BLE or WiCAN Pro (BLE + protocol "elm327", PIN under Settings → Cars). *Classic Bluetooth (SPP) dongles without "LE" do not work.*
 - Home Assistant with an MQTT broker (e.g. the Mosquitto add-on)
 
 ## Flashing
@@ -52,9 +53,9 @@ Later updates: web UI → System → Firmware update with `obd2mqtt-vX.Y.Z-esp32
 
 1. After the first boot the ESP32 opens the WiFi network **`OBD2MQTT-xxxx`** (password `obd2mqtt`). Connect and open http://192.168.4.1.
 2. **Settings → WiFi**: enter SSID and password, then **MQTT**: broker, user and password.
-3. **BLE dongle**: park the car with the dongle plugged in nearby, then click "Scan for dongles". Entries marked with ★ are most likely OBD adapters. Click the entry.
+3. **Cars**: park the car with the dongle plugged in nearby, then click "Scan for dongles". Entries marked with ★ are most likely OBD adapters. Click "Use for …" for car 1. For a second car, enable car 2 and assign its own dongle the same way.
 4. "Save & restart". Afterwards the interface is available at `http://obd2mqtt.local` or the assigned IP address.
-5. **Profile**: select the matching profile and click "Activate". Click "Test" next to `soc` to check that a value comes back.
+5. **Profile**: select the matching profile and click "Use for …" the car. Choose the car at the top right and click "Test" next to `soc` to check that a value comes back.
 
 ## Profiles
 
@@ -110,22 +111,27 @@ Values flagged `"sleep_zero": true` in the profile JSON (e.g. charging power, ch
 
 ## MQTT
 
+Each car has its own base topic (Settings → Cars, default `obd2mqtt/car1` and `obd2mqtt/car2`) and its own Home Assistant device. The bridge itself uses the bridge base topic (default `obd2mqtt`).
+
 | Topic | Content |
 |---|---|
-| `obd2mqtt/<pid-id>` | measured value (retained), e.g. `obd2mqtt/soc` → `54.5` |
-| `obd2mqtt/voltage_12v` | 12 V voltage measured at the dongle |
-| `obd2mqtt/car` | `online` / `offline` – dongle reachable |
-| `obd2mqtt/polling` | `ON` / `OFF` – main switch for automatic polling; switch it via `obd2mqtt/polling/set` (in HA: switch "Polling") |
-| `obd2mqtt/battery_low` | `ON` / `OFF` – 12 V battery below the warning threshold (default 12.0 V) |
-| `obd2mqtt/car_awake` | `ON` / `OFF` – car awake (12 V above the sleep threshold, i.e. DC/DC converter active) |
-| `obd2mqtt/ble_rssi` | BLE signal strength |
-| `obd2mqtt/last_error` | last error |
-| `obd2mqtt/status` | `online` / `offline` (last will of the bridge) |
-| `obd2mqtt/profile` | name of the active vehicle profile, e.g. `Hyundai IONIQ 5 / Kia EV6` (retained) |
-| `obd2mqtt/profile/attributes` | details as JSON: `{"id":"ioniq5","name":"Hyundai IONIQ 5 / Kia EV6","model":"…","active_pids":[…],"firmware":"…"}` |
-| `obd2mqtt/state` | all current values incl. profile as **one** JSON after every poll cycle: `{"profile":"Hyundai IONIQ 5 / Kia EV6","profile_id":"ioniq5","time":"…","values":{"soc":71.5,…},"voltage_12v":12.6}` |
+| `<car base>/<pid-id>` | measured value (retained), e.g. `obd2mqtt/car1/soc` → `54.5` |
+| `<car base>/voltage_12v` | 12 V voltage measured at the dongle |
+| `<car base>/car` | `online` / `offline` – dongle reachable |
+| `<car base>/polling` | `ON` / `OFF` – automatic polling of this car; switch it via `<car base>/polling/set` (in HA: switch "Polling") |
+| `<car base>/battery_low` | `ON` / `OFF` – 12 V battery below the warning threshold (default 12.0 V) |
+| `<car base>/car_awake` | `ON` / `OFF` – car awake (12 V above the sleep threshold, i.e. DC/DC converter active) |
+| `<car base>/ble_rssi` | BLE signal strength |
+| `<car base>/last_error` | last error |
+| `<car base>/profile` | name of the car's vehicle profile, e.g. `Hyundai IONIQ 5` (retained) |
+| `<car base>/profile/attributes` | details as JSON: `{"id":"ioniq5","name":"Hyundai IONIQ 5","model":"…","active_pids":[…],"firmware":"…"}` |
+| `<car base>/state` | all current values as **one** JSON after every poll cycle: `{"car":"IONIQ 5","profile":"Hyundai IONIQ 5","profile_id":"ioniq5","time":"…","values":{"soc":71.5,…},"voltage_12v":12.6}` |
+| `obd2mqtt/status` | `online` / `offline` (last will of the bridge, availability of all entities) |
+| `obd2mqtt/update` | firmware update state (HA update entity "Firmware" on the "OBD2MQTT Bridge" device) |
 
-Discovery is published under `homeassistant/sensor/obd2mqtt_xxxxxx/<id>/config`.
+Discovery is published under `homeassistant/<component>/obd2mqtt_xxxxxx_car1_<id>/config` (car 2: `_car2_`, bridge: `_bridge_`).
+
+**Upgrading from v0.4:** the existing dongle and profile settings become car 1. The topics change from `obd2mqtt/…` to `obd2mqtt/car1/…`, so Home Assistant creates new entities; delete the old device once in HA (Settings → Devices → MQTT).
 
 ## Notes
 
@@ -151,7 +157,7 @@ src/web.*, web_ui.h     REST API and web interface
 scripts/gen_web_assets.py  gzips web_ui.h / help_ui.h into src/web_assets.h before each build
 src/help_ui.h           built-in manual
 src/config.*            configuration and profiles (LittleFS)
-src/default_profiles.h  factory profile IONIQ 5 / EV6
+src/default_profiles.h  factory profiles IONIQ 5, EV6
 lib/tinyexpr            formula parser (zlib license, codeplea/tinyexpr)
 changelog.json          changelog source → tools/gen_changelog.py → CHANGELOG.en.md + web UI
 ```

@@ -104,28 +104,29 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <li>Enter the WiFi password.</li>
 </ol>
 <h3>4.3 MQTT</h3>
-<p>Enter the broker address (IP of your Home Assistant or MQTT server), port <code>1883</code>, user and password. “Device name in HA” is the name under which the car appears in Home Assistant (e.g. “IONIQ 5”).</p>
+<p>Enter the broker address (IP of your Home Assistant or MQTT server), port <code>1883</code>, user and password. “Bridge base topic” (default <code>obd2mqtt</code>) is used for the bridge itself (online status, firmware update). Each car gets its own base topic and Home Assistant device under <b>Cars</b>.</p>
 <h3>4.4 Pair the dongle</h3>
 <ol>
 <li>Park the car with the dongle plugged in nearby.</li>
-<li>Under <b>BLE dongle</b> click <b>Scan for dongles</b> (takes 6 s).</li>
-<li>Click the matching entry – entries marked with ★ are most likely OBD dongles. Leave the UUID fields empty, they are detected automatically. After the first connection the detected dongle (name, type, ELM version) is shown below the button.</li>
+<li>Under <b>Cars</b> click <b>Scan for dongles</b> (takes 6 s).</li>
+<li>Click <b>Use for …</b> next to the matching entry for car 1 (and for car 2 with its own dongle) – entries marked with ★ are most likely OBD dongles. Leave the UUID fields empty, they are detected automatically. After the first connection the detected dongle (name, type, ELM version) is shown in the car's card on the Status tab.</li>
 </ol>
+<p><b>Two cars:</b> enable car 2, give it a name, a Home Assistant device name, a base topic (default <code>obd2mqtt/car2</code>), its profile and its dongle. The ESP32 connects to one car at a time and serves whichever car is due – a charging car is polled every cycle, a sleeping car only gets a short voltage check. While one car is being polled, the other waits a few seconds.</p>
 <h3>4.5 Save</h3>
 <p>Click <b>Save &amp; restart</b>. The ESP32 now connects to your WiFi. Afterwards you can reach it at <code>http://obd2mqtt.local</code> or at the IP address assigned by your router (see the device list of your router).</p>
 <h3>4.6 Choose the vehicle profile</h3>
 <ol>
-<li>Tab <b>Profile</b> → choose the matching profile (“Hyundai IONIQ 5 / Kia EV6”) → <b>Activate</b>.</li>
-<li>Switch the car on or let it charge, then click <b>Test</b> next to “soc”. If a plausible value appears, everything is set up.</li>
+<li>Tab <b>Profile</b> → choose the matching profile (“Hyundai IONIQ 5” or “Kia EV6”) → <b>Use for …</b> the car. Each car has its own profile, so battery capacity and consumption can differ.</li>
+<li>Switch the car on or let it charge, choose the car at the top right, then click <b>Test</b> next to “soc”. If a plausible value appears, everything is set up.</li>
 </ol>
-<div class="box ok">Done! From now on the <b>Status</b> tab shows the current values, and a new device appears in Home Assistant.</div>
+<div class="box ok">Done! From now on the <b>Status</b> tab shows the current values, and one device per car plus an “OBD2MQTT Bridge” device appear in Home Assistant.</div>
 </section>
 
 <section id="usage">
 <h2>5. The interface</h2>
 <table>
 <tr><th>Tab</th><th>What for?</th></tr>
-<tr><td><b>Status</b></td><td>Current values, connection status (WiFi, MQTT, Bluetooth), log. <b>Poll now</b> fetches new values immediately. Log buttons: <b>Copy</b>, <b>Download</b>, <b>Delete</b>.</td></tr>
+<tr><td><b>Status</b></td><td>Current values, connection status (WiFi, MQTT, Bluetooth), log. One card per car with its values, connection and last error. <b>Poll now</b> fetches new values for that car immediately. Log buttons: <b>Copy</b>, <b>Download</b>, <b>Delete</b>.</td></tr>
 <tr><td><b>Profile</b></td><td>Which values are polled, how often (column “Interval s”) and how they are calculated. <b>Test</b> lets you try any value immediately.</td></tr>
 <tr><td><b>Terminal</b></td><td>For advanced users: send commands directly to the dongle.</td></tr>
 <tr><td><b>Settings</b></td><td>WiFi, MQTT, dongle, polling times, time of day, password for the interface.</td></tr>
@@ -135,7 +136,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <h3>Important settings</h3>
 <table>
 <tr><th>Setting</th><th>Meaning</th><th>Default</th></tr>
-<tr><td>Polling ON/OFF</td><td>Main switch on the status page (and in Home Assistant as switch “Polling”). When OFF the bridge no longer connects to the car – e.g. at the workshop or during long parking. Test, terminal and “Poll now” keep working. Survives a restart.</td><td>ON</td></tr>
+<tr><td>Polling ON/OFF</td><td>Switch per car on the status page (and in Home Assistant as switch “Polling” of that car). When OFF the bridge no longer connects to the car – e.g. at the workshop or during long parking. Test, terminal and “Poll now” keep working. Survives a restart.</td><td>ON</td></tr>
 <tr><td>12V minimum voltage</td><td>Below this value no polling takes place, to protect the 12 V battery.</td><td>12.2 V</td></tr>
 <tr><td>Car asleep below</td><td>If the 12 V voltage is below this value, the car is off and not charging. The bridge then sends <b>no requests to the car</b> (each one would wake it up) and only measures the voltage at the dongle once a minute. As soon as the car wakes up by itself (driving, charging, preconditioning, 12 V top-up), normal polling resumes. An awake IONIQ 5 is at about 14.7 V, a sleeping one at 12.4–12.8 V. With a 12 V lithium battery (resting voltage ~13.3 V) raise the value to about 13.6 V. 0 = always poll.</td><td>13.2 V</td></tr>
 <tr><td>12V warning below</td><td>If the 12 V voltage drops below this value, Home Assistant reports “12V low” (and the log a warning). Good for a notification before the battery is flat. 0 = off.</td><td>12.0 V</td></tr>
@@ -238,7 +239,7 @@ For problems that only occur occasionally: switch on the <b>diagnostic log</b> �
 <details><summary>“Dongle not reachable”</summary>
 <p>Car not within range, dongle asleep or the Bluetooth connection is too weak. “BLE signal” should be better than about −85 dBm – otherwise move the ESP32 closer to the car. Important: the dongle must not be connected to a phone app at the same time.</p></details>
 <details><summary>Dongle with PIN (e.g. WiCAN Pro)</summary>
-<p>Some dongles can only be used after pairing. For the <b>WiCAN Pro</b>: enable Bluetooth in its interface and select the protocol “elm327”. Then enter the PIN here under Settings → BLE dongle (default <code>123456</code>) and save. The bridge pairs automatically on the first connection; the log shows “BLE pairing OK”. On “pairing failed” check the PIN – the old pairing is discarded and rebuilt on the next attempt.</p></details>
+<p>Some dongles can only be used after pairing. For the <b>WiCAN Pro</b>: enable Bluetooth in its interface and select the protocol “elm327”. Then enter the PIN here under Settings → Cars (default <code>123456</code>) and save. The bridge pairs automatically on the first connection; the log shows “BLE pairing OK”. On “pairing failed” check the PIN – the old pairing is discarded and rebuilt on the next attempt.</p></details>
 <details><summary>No values arrive in Home Assistant</summary>
 <p>Check in the Status tab whether “MQTT” is green. If not: check broker address, user and password. The MQTT integration must be set up in Home Assistant.</p></details>
 <details><summary>“Incomplete response” in the log</summary>
@@ -283,21 +284,22 @@ async function check(){try{const s=await (await fetch('/api/status')).json();
  h+=s.safe_mode?chk('err','<b>Safe mode active</b> – Bluetooth is off.','troubleshooting'):'';
  h+=s.wifi.connected?chk('ok',`WiFi connected to <b>${esc(s.wifi.ssid)}</b> (${s.wifi.rssi} dBm)`):chk('err','No WiFi – check the setup.','setup');
  h+=s.mqtt?chk('ok','MQTT connected – values go to Home Assistant.'):chk('err','MQTT not connected – no values in Home Assistant.','troubleshooting');
- if(!s.ble.mac)h+=chk('warn','No dongle set up yet.','setup');
- else if(s.ble.connected)h+=chk('ok',`Dongle connected (${s.ble.rssi} dBm)`);
- else h+=chk(s.ble.last_ok_s>=0?'ok':'warn',`Dongle ${esc(s.ble.mac)} currently not connected${s.ble.last_ok_s>=0?' – last reachable '+fmt(s.ble.last_ok_s)+' ago (normal: Bluetooth is disconnected between polls)':' – never reached'}.`,s.ble.last_ok_s>=0?'':'troubleshooting');
- const act=(s.pids||[]).filter(p=>p.enabled);
- const got=act.filter(p=>p.age_s>=0);
- h+=got.length?chk('ok',`Profile <b>${esc(s.profile_name||s.profile)}</b>: ${got.length} of ${act.length} values received (e.g. ${esc(got[0].name)} = ${esc(got[0].value)} ${esc(got[0].unit)}).`)
-             :chk('warn',`Profile <b>${esc(s.profile_name||s.profile)}</b>: no values yet – switch the car on or let it charge.`,'values');
- if(s.voltage!==undefined)h+=chk(s.voltage<12.2?'warn':'ok',`12 V battery: ${s.voltage.toFixed(1)} V`,s.voltage<12.2?'battery':'');
- if(s.last_error){const e=s.last_error,l='troubleshooting';
-  h+=chk('warn','Last message: <code>'+esc(e)+'</code>',l)}
+ const cars=(s.cars||[]).filter(c=>c.enabled);
+ if(!cars.length)h+=chk('warn','No car enabled yet (Settings → Cars).','setup');
+ for(const c of cars){const b=c.ble,n='<b>'+esc(c.name)+'</b>: ';
+  if(!b.mac)h+=chk('warn',n+'no dongle set up yet.','setup');
+  else if(b.connected)h+=chk('ok',n+`dongle connected${b.rssi?' ('+b.rssi+' dBm)':''}`);
+  else h+=chk(b.last_ok_s>=0?'ok':'warn',n+`dongle ${esc(b.mac)} currently not connected${b.last_ok_s>=0?' – last reachable '+fmt(b.last_ok_s)+' ago (normal: Bluetooth is disconnected between polls, one car at a time)':' – never reached'}.`,b.last_ok_s>=0?'':'troubleshooting');
+  const act=(c.pids||[]).filter(p=>p.enabled),got=act.filter(p=>p.age_s>=0);
+  h+=got.length?chk('ok',n+`profile <b>${esc(c.profile_name||c.profile)}</b>: ${got.length} of ${act.length} values received (e.g. ${esc(got[0].name)} = ${esc(got[0].value)} ${esc(got[0].unit)}).`)
+              :chk('warn',n+`profile <b>${esc(c.profile_name||c.profile)}</b>: no values yet – switch the car on or let it charge.`,'values');
+  if(c.voltage!==undefined)h+=chk(c.voltage<12.2?'warn':'ok',n+`12 V battery ${c.voltage.toFixed(1)} V`,c.voltage<12.2?'battery':'');
+  if(c.last_error)h+=chk('warn',n+'last message <code>'+esc(c.last_error)+'</code>','troubleshooting')}
  h+=chk('ok','Last restart: '+esc(s.reset_reason||'–')+' · uptime '+fmt(s.uptime));
  $('checks').innerHTML=h}catch(e){$('checks').innerHTML=chk('err','Status not available.')}}
 const fmt=s=>s<60?s+' s':s<3600?Math.round(s/60)+' min':s<86400?Math.round(s/3600)+' h':Math.round(s/86400)+' days';
 check();setInterval(check,10000);
-// ---------- Suche ----------
+// ---------- Search ----------
 const secs=[...document.querySelectorAll('main section')].filter(x=>x.id!=='check'&&x.id!=='contents');
 secs.forEach(x=>x.dataset.html=x.innerHTML);
 function search(q){q=q.trim();let any=false;
