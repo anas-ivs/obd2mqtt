@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.1
+- Firmware upload (System → Firmware update) switches Bluetooth off completely while flashing – lower current, against brownout restarts during the upload. Interim version to install 0.5
+
 ## 0.4.0
 - English only: web interface, manual, log messages, Home Assistant names and factory profile; language switch removed. Manual now at /help (/hilfe redirects)
 - Only the Hyundai IONIQ 5 / Kia EV6 profile is included (XPeng profiles removed); startup repair of old profiles removed

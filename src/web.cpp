@@ -490,7 +490,7 @@ void begin() {
       bool ok = otaState == 2;
       if (!ok && otaState != 3) { otaState = 3; if (otaError.isEmpty()) otaError = "No data received"; }
       sendMsg(r, ok, ok ? String("Update successful – restarting…") : String("Update failed: ") + otaError);
-      if (ok) rebootAt = millis() + 1500;
+      if (ok || Poller::bleStopped()) rebootAt = millis() + 1500;   // Bluetooth was switched off → restart brings it back
       else Poller::setPaused(false);
     },
     [](AsyncWebServerRequest* r, const String& fn, size_t index, uint8_t* data, size_t len, bool final) {
@@ -500,7 +500,7 @@ void begin() {
         otaWritten = 0;
         otaTotal = r->contentLength();
         otaState = 1;
-        Poller::setPaused(true);   // no BLE queries while flashing
+        Poller::setPaused(true, true);   // no BLE while flashing – Bluetooth stack off to lower the current
         logf("OTA update started: %s (%u bytes)", fn.c_str(), (unsigned)otaTotal);
         if (Update.isRunning()) Update.abort();       // leftovers from an aborted attempt
         if (len && data[0] != 0xE9) {

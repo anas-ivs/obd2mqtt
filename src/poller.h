@@ -18,7 +18,8 @@ void requestProfileReload();                  // reload active profile
 void requestPollNow();
 String lastErrorText();                       // current "last error" (empty = none)
 void requestEnabled(bool on);                 // main switch (web/MQTT) – saved in loop()
-void setPaused(bool p);                       // e.g. during OTA
+void setPaused(bool p, bool bleOff = false); // e.g. during OTA; bleOff: also switch the Bluetooth stack off
+bool bleStopped();                            // Bluetooth stack off (only a restart turns it back on)
 bool isPaused();
 
 enum JobType { JOB_RAW, JOB_TEST, JOB_SCAN, JOB_DIAG };

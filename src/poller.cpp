@@ -844,8 +844,11 @@ static void updateCache() {
 }
 
 static volatile bool paused = false;
+static volatile bool bleOffRequested = false, bleIsOff = false;
 bool isPaused() { return paused || !bleOn; }
-void setPaused(bool p) {
+bool bleStopped() { return bleIsOff; }
+void setPaused(bool p, bool bleOff) {
+  if (p && bleOff) bleOffRequested = true;
   paused = p;
   if (p) logf("%s", "Polling paused (firmware update)");
 }
@@ -853,7 +856,18 @@ void setPaused(bool p) {
 void loop() {
   applyEnable();
   if (!bleOn) { applyPendingConfig(); if (flagProfileReload) { flagProfileReload = false; reloadProfile(); } updateCache(); return; }
-  if (paused) { if (ElmBle::connected()) { ElmBle::disconnect(); elmReady = false; } updateCache(); return; }
+  if (paused) {
+    if (ElmBle::connected()) { ElmBle::disconnect(); elmReady = false; }
+    // Firmware upload: switch the Bluetooth stack off completely – less current while WiFi and flash are busy
+    // (brownouts during uploads). Done here in the loop task, never while a BLE command is running.
+    if (bleOffRequested && !bleIsOff) {
+      ElmBle::shutdown();
+      bleIsOff = true;
+      logf("%s", "Bluetooth switched off for the firmware update");
+    }
+    updateCache();
+    return;
+  }
   applyPendingConfig();
   if (flagProfileReload) { flagProfileReload = false; reloadProfile(); }
   runJob();
