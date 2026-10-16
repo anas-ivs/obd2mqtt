@@ -71,6 +71,7 @@ void configToJson(JsonDocument& d, bool mask) {
     o["name"] = c.name;
     o["device_name"] = c.deviceName;
     o["mqtt_base"] = c.mqttBase;
+    o["ble_match"] = c.bleMatch;
     o["ble_mac"] = c.bleMac;
     o["ble_addr_type"] = c.bleAddrType;
     o["ble_service"] = c.bleService;
@@ -108,6 +109,8 @@ static void carFromJson(JsonVariantConst s, CarConfig& c) {
   str("device_name", c.deviceName);
   str("mqtt_base", c.mqttBase);
   while (c.mqttBase.endsWith("/")) c.mqttBase.remove(c.mqttBase.length() - 1);
+  str("ble_match", c.bleMatch);
+  if (c.bleMatch != "name") c.bleMatch = "mac";
   str("ble_mac", c.bleMac);
   c.bleMac.toUpperCase();
   str("ble_addr_type", c.bleAddrType);

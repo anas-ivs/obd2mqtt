@@ -16,7 +16,9 @@ extern volatile bool quiet;         // true = don't log connect/disconnect (car 
 bool connected();                   // any dongle connected
 bool connectedTo(const CarConfig& car);   // this car's dongle connected
 uint32_t dropCount();               // count of unplanned disconnects
-bool relaxedParams(const CarConfig& car);               // true = switched to slow connection parameters after repeated 0x208
+bool relaxedParams(const CarConfig& car);
+bool configured(const CarConfig& car);     // MAC (mac mode) or name (name mode) set
+String currentAddress(const CarConfig& car); // MAC, or in name mode the last address found ("" = not found yet)               // true = switched to slow connection parameters after repeated 0x208
 int  rssi();
 uint16_t mtu();                     // negotiated MTU (0 = not connected)
 String detectedUuids();             // "svc / notify / write" after a successful connection

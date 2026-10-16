@@ -12,7 +12,8 @@ struct CarConfig {
   String deviceName;                    // device name in Home Assistant
   String mqttBase;                      // state topics: <base>/<pid>, e.g. obd2mqtt/car1
   // BLE dongle
-  String bleMac;                        // AA:BB:CC:DD:EE:FF
+  String bleMatch = "mac";              // find the dongle by: mac | name (for dongles whose MAC changes on every power-up)
+  String bleMac;                        // AA:BB:CC:DD:EE:FF (name mode: last address picked in the scan)
   String bleAddrType = "auto";          // auto | public | random
   String bleService, bleNotify, bleWrite; // empty = auto-detect
   String bleName;                       // display name (from scan or dongle)

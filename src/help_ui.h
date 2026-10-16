@@ -109,7 +109,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <ol>
 <li>Park the car with the dongle plugged in nearby.</li>
 <li>Under <b>Cars</b> click <b>Scan for dongles</b> (takes 6 s).</li>
-<li>Click <b>Use for …</b> next to the matching entry for car 1 (and for car 2 with its own dongle) – entries marked with ★ are most likely OBD dongles. Leave the UUID fields empty, they are detected automatically. After the first connection the detected dongle (name, type, ELM version) is shown in the car's card on the Status tab.</li>
+<li>Click <b>Use for …</b> next to the matching entry for car 1 (and for car 2 with its own dongle) – entries marked with ★ are most likely OBD dongles. Leave the UUID fields empty, they are detected automatically. After the first connection the detected dongle (name, type, ELM version) is shown in the car's card on the Status tab. Dongles whose MAC changes on every power-up (e.g. vLinker MC+) are found by their Bluetooth name instead: picking a dongle with a random address sets <b>Find dongle by</b> to “Bluetooth name” automatically.</li>
 </ol>
 <p><b>Two cars:</b> enable car 2, give it a name, a Home Assistant device name, a base topic (default <code>obd2mqtt/car2</code>), its profile and its dongle. The ESP32 connects to one car at a time and serves whichever car is due – a charging car is polled every cycle, a sleeping car only gets a short voltage check. While one car is being polled, the other waits a few seconds.</p>
 <h3>4.5 Save</h3>

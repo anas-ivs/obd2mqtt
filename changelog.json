@@ -1,5 +1,13 @@
 [
  {
+  "v": "0.6.0",
+  "en": [
+   "New: find the dongle by its Bluetooth name (Settings → Cars → Find dongle by) – for dongles whose MAC changes on every power-up, e.g. vLinker MC+. The bridge tries the last address first and only scans (approx. 4 s) when the dongle has a new address",
+   "Dongle scan: picking a dongle with a random address switches that car to “find by name” automatically",
+   "Two cars set to find their dongle by the same name are rejected when saving (they could not be told apart)"
+  ]
+ },
+ {
   "v": "0.5.0",
   "en": [
    "New: two cars – one dongle per car, each with its own profile, MQTT base topic (default obd2mqtt/car1, obd2mqtt/car2) and Home Assistant device. One BLE connection at a time; the bridge serves whichever car is due",

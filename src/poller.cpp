@@ -41,7 +41,7 @@ struct Car {
   bool unreachLogged = false;         // log "dongle sleeps with the car" only once
   uint32_t pollCycles = 0;
   int lowState = -1;                  // 12V warning state (-1 = unknown)
-  String elmVersion, cacheName, cacheKind, cacheUuids;
+  String elmVersion, cacheName, cacheKind, cacheUuids, cacheAddr;
   bool cacheBle = false;              // for the web task (no BLE calls there)
   int cacheRssi = 0;
   volatile bool flagReload = false;
@@ -575,7 +575,9 @@ static String diagReport() {
   }
   ln(String("Car: ") + (C->idx + 1) + " – " + carName(C->idx));
   ln(String("Profile: ") + cc.profile + " – " + profile.name + " (" + profile.model + ")");
-  String mac = cc.bleMac.length() == 17 ? cc.bleMac.substring(0, 8) + ":xx:xx:xx" : cc.bleMac;
+  String addr = ElmBle::currentAddress(cc);
+  String mac = addr.length() == 17 ? addr.substring(0, 8) + ":xx:xx:xx" : addr;
+  if (cc.bleMatch == "name") mac = "found by name, " + (mac.length() ? mac : String("not found yet"));
   ln("Dongle: " + ElmBle::deviceName(cc) + " / " + C->cacheKind + " / " + mac);
   ln(String("Last restart: ") + Watchdog::resetReason() +
      (strlen(Watchdog::hangStep()) ? String(" – hung at: ") + Watchdog::hangStep() : String("")));
@@ -866,7 +868,7 @@ static void applyPendingConfig() {
   logf("%s", "Configuration saved");
   for (int i = 0; i < NCARS; i++) {
     const CarConfig &b = before.cars[i], &a = cfg.cars[i];
-    if (b.bleMac != a.bleMac || b.bleService != a.bleService || b.bleNotify != a.bleNotify ||
+    if (b.bleMac != a.bleMac || b.bleMatch != a.bleMatch || b.bleName != a.bleName || b.bleService != a.bleService || b.bleNotify != a.bleNotify ||
         b.bleWrite != a.bleWrite || b.bleAddrType != a.bleAddrType || b.blePin != a.blePin || b.enabled != a.enabled) {
       if (ElmBle::connectedTo(a)) dropLink();
       cars[i].elmReady = false;
@@ -894,12 +896,12 @@ static void updateCache() {
   bool info = !lastInfo || millis() - lastInfo > 2000;   // RSSI (controller round trip) and texts only every 2 s
   bool fs = !lastFs || millis() - lastFs > 60000;
   int r = 0, connectedCar = -1;
-  String nm[NCARS], kd, uu;
+  String nm[NCARS], ad[NCARS], kd, uu;
   for (int i = 0; i < NCARS; i++) if (ElmBle::connectedTo(cfg.cars[i])) connectedCar = i;
   if (info) {
     lastInfo = millis();
     if (connectedCar >= 0) { r = ElmBle::rssi(); kd = ElmBle::dongleKind(); uu = ElmBle::detectedUuids(); }
-    for (int i = 0; i < NCARS; i++) nm[i] = ElmBle::deviceName(cfg.cars[i]);
+    for (int i = 0; i < NCARS; i++) { nm[i] = ElmBle::deviceName(cfg.cars[i]); ad[i] = ElmBle::currentAddress(cfg.cars[i]); }
   }
   size_t fu = 0, ft = 0;
   if (fs) { lastFs = millis(); fu = LittleFS.usedBytes(); ft = LittleFS.totalBytes(); }
@@ -910,6 +912,7 @@ static void updateCache() {
     if (!c.cacheBle) c.cacheRssi = 0;
     if (info) {
       c.cacheName = nm[c.idx];
+      c.cacheAddr = ad[c.idx];
       if (c.cacheBle) { c.cacheRssi = r; c.cacheKind = kd; c.cacheUuids = uu; }
     }
   }
@@ -929,7 +932,7 @@ void setPaused(bool p, bool bleOff) {
 // Car that may be polled automatically (enabled, dongle configured, polling on or "Poll now" pending)
 static bool pollable(Car& c) {
   const CarConfig& cc = cfg.cars[c.idx];
-  return cc.enabled && cc.bleMac.length() && (cc.pollEnabled || c.flagPollNow);
+  return cc.enabled && ElmBle::configured(cc) && (cc.pollEnabled || c.flagPollNow);
 }
 
 void loop() {
@@ -1033,7 +1036,8 @@ void statusJson(JsonDocument& d) {
     o["name"] = carName(c.idx);
     o["base"] = cc.mqttBase;
     o["ble"]["connected"] = c.cacheBle;
-    o["ble"]["mac"] = cc.bleMac;
+    o["ble"]["mac"] = c.cacheAddr;
+    o["ble"]["by_name"] = cc.bleMatch == "name";
     o["ble"]["rssi"] = c.cacheRssi;
     o["ble"]["uuids"] = c.cacheUuids;
     o["ble"]["name"] = c.cacheName;

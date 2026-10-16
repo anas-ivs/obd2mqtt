@@ -18,7 +18,11 @@ static bool writeWithResponse = false;
 static String uuidInfo, kind;
 static const CarConfig* cur = nullptr;      // dongle settings of the connected (or last) car
 static std::map<String, String> gapNames;  // MAC → name read from the dongle (GAP 0x2A00)
-static std::vector<String> relaxedMacs;    // dongles that need the slower connection parameters
+static std::vector<String> relaxedMacs;    // dongles (carKey) that need the slower connection parameters
+static std::map<String, std::pair<String, uint8_t>> foundAddr;   // name mode: dongle name → last address + type
+
+// Identity of a car's dongle: its MAC, or its name when it is found by name (MAC changes on every power-up)
+static String carKey(const CarConfig& c) { return c.bleMatch == "name" ? "name:" + c.bleName : c.bleMac; }
 static volatile uint32_t connectMs = 0;    // time of the last successful connect
 
 static std::mutex rxMutex;
@@ -91,7 +95,7 @@ class ClientCb : public NimBLEClientCallbacks {
     // Only count drops shortly after connecting (driving the car away etc. should not trigger the switch)
     if (reason == 0x208 && !relaxed && millis() - connectMs < 60000 && ++fastDrops >= 2) {
       relaxed = true;
-      if (cur) relaxedMacs.push_back(cur->bleMac);
+      if (cur) relaxedMacs.push_back(carKey(*cur));
       logf("%s", "Connection dropped repeatedly (0x208) – using slower BLE connection parameters for this dongle from now on");
     }
   }
@@ -113,8 +117,17 @@ bool connected() { return client && client->isConnected(); }
 bool connectedTo(const CarConfig& c) { return connected() && cur == &c; }
 uint32_t dropCount() { return drops; }
 bool relaxedParams(const CarConfig& c) {
-  for (auto& m : relaxedMacs) if (m == c.bleMac) return true;
+  String k = carKey(c);
+  for (auto& m : relaxedMacs) if (m == k) return true;
   return false;
+}
+bool configured(const CarConfig& c) {
+  return c.bleMatch == "name" ? c.bleName.length() > 0 : c.bleMac.length() == 17;
+}
+String currentAddress(const CarConfig& c) {
+  if (c.bleMatch != "name") return c.bleMac;
+  auto it = foundAddr.find(c.bleName);
+  return it != foundAddr.end() ? it->second.first : String();
 }
 // RSSI right after connecting is often not measured yet (e.g. -128) → 0 = unknown
 int rssi() {
@@ -125,6 +138,7 @@ int rssi() {
 uint16_t mtu() { return connected() ? client->getMTU() : 0; }
 String detectedUuids() { return uuidInfo; }
 String deviceName(const CarConfig& c) {
+  if (c.bleMatch == "name") return c.bleName;
   auto it = gapNames.find(c.bleMac);
   return it != gapNames.end() && it->second.length() ? it->second : c.bleName;
 }
@@ -195,10 +209,51 @@ static bool resolveCharacteristics(String& err) {
   return false;
 }
 
+static std::vector<ScanEntry> scanFor(uint32_t ms);
+
+// Name mode: short scan for the dongle's name → its current address and type
+static bool findByName(const String& name, String& mac, uint8_t& type) {
+  Watchdog::feed();
+  Watchdog::step("BLE find by name");
+  for (auto& e : scanFor(4000)) {
+    if (e.name != name) continue;
+    mac = e.mac;
+    type = e.addrRandom ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC;
+    return true;
+  }
+  return false;
+}
+
 bool connect(const CarConfig& car, String& err) {
   if (connectedTo(car)) return true;
   disconnect();   // also when the other car's dongle is connected: only one connection at a time
-  if (car.bleMac.length() != 17) { err = "No valid BLE MAC configured"; return false; }
+  if (!configured(car)) {
+    err = car.bleMatch == "name" ? "No dongle name configured" : "No valid BLE MAC configured";
+    return false;
+  }
+  const bool byName = car.bleMatch == "name";
+  String mac = car.bleMac;
+  std::vector<uint8_t> types;
+  if (car.bleAddrType == "public") types = {BLE_ADDR_PUBLIC};
+  else if (car.bleAddrType == "random") types = {BLE_ADDR_RANDOM};
+  else types = {BLE_ADDR_PUBLIC, BLE_ADDR_RANDOM};
+  bool scanned = false;
+  if (byName) {
+    auto it = foundAddr.find(car.bleName);
+    if (it != foundAddr.end()) { mac = it->second.first; types = {it->second.second}; }   // try the last address first
+    else {
+      uint8_t t;
+      scanned = true;
+      if (!findByName(car.bleName, mac, t)) {
+        err = "Dongle '" + car.bleName + "' not found (car away / dongle asleep?)";
+        Watchdog::step("Poller");
+        return false;
+      }
+      types = {t};
+      foundAddr[car.bleName] = {mac, t};
+      if (!quiet) logf("BLE: dongle '%s' found at %s", car.bleName.c_str(), mac.c_str());
+    }
+  }
   if (cur != &car) fastDrops = 0;
   cur = &car;
   relaxed = relaxedParams(car);
@@ -219,11 +274,6 @@ bool connect(const CarConfig& car, String& err) {
   // Some dongles (e.g. Vgate) drop the connection with it → default values after repeated 0x208.
   if (relaxed) client->setConnectionParams(24, 40, 0, 600);
   else client->setConnectionParams(6, 12, 0, 400);
-
-  std::vector<uint8_t> types;
-  if (car.bleAddrType == "public") types = {BLE_ADDR_PUBLIC};
-  else if (car.bleAddrType == "random") types = {BLE_ADDR_RANDOM};
-  else types = {BLE_ADDR_PUBLIC, BLE_ADDR_RANDOM};
 
   // Each step blocks for up to 30 s (BLE timeout). To keep the 60 s watchdog from firing:
   // feed the watchdog before each step, remember the step for crash analysis, abort after 20 s.
@@ -246,10 +296,26 @@ bool connect(const CarConfig& car, String& err) {
   bool ok = false;
   for (uint8_t t : types) {
     if (!step("BLE connect")) return fail();
-    NimBLEAddress addr(std::string(car.bleMac.c_str()), t);
+    NimBLEAddress addr(std::string(mac.c_str()), t);
     if (client->connect(addr)) { ok = true; break; }
   }
-  if (!ok) { err = "Dongle not reachable (car away / dongle asleep?)"; return fail(); }
+  if (!ok && byName && !scanned) {
+    // Last address no longer valid (dongle restarted with a new address) → look for the name again
+    uint8_t t;
+    String m2;
+    if (findByName(car.bleName, m2, t)) {
+      if (m2 != mac && !quiet) logf("BLE: dongle '%s' has a new address %s", car.bleName.c_str(), m2.c_str());
+      mac = m2;
+      foundAddr[car.bleName] = {mac, t};
+      if (!step("BLE connect")) return fail();
+      ok = client->connect(NimBLEAddress(std::string(mac.c_str()), t));
+    }
+  }
+  if (!ok) {
+    err = byName ? "Dongle '" + car.bleName + "' not reachable (car away / dongle asleep?)"
+                 : String("Dongle not reachable (car away / dongle asleep?)");
+    return fail();
+  }
 
   if (!step("BLE MTU")) return fail();
   client->exchangeMTU();
@@ -269,7 +335,7 @@ bool connect(const CarConfig& car, String& err) {
              chrNotify->getUUID().toString().c_str() + " / " + chrWrite->getUUID().toString().c_str();
   // Read the device name from the GAP service (0x1800 / 0x2A00) – not every dongle provides it.
   // Only on the first connect: saves another (blocking) read request on every reconnect.
-  if (gapNames.find(car.bleMac) == gapNames.end() && step("BLE name")) {
+  if (!byName && gapNames.find(car.bleMac) == gapNames.end() && step("BLE name")) {
     NimBLEAttValue v = client->getValue(NimBLEUUID((uint16_t)0x1800), NimBLEUUID((uint16_t)0x2A00));
     String n;
     for (size_t i = 0; i < v.length() && i < 40; i++) {
@@ -296,7 +362,7 @@ bool connect(const CarConfig& car, String& err) {
     int r = rssi();
     String rs = r ? String(r) + " dBm" : String("not measured yet");
     logf("BLE connected: %s (%s), RSSI %s, MTU %u, UUIDs %s%s",
-         deviceName(car).length() ? deviceName(car).c_str() : car.bleMac.c_str(), kind.c_str(), rs.c_str(),
+         deviceName(car).length() ? deviceName(car).c_str() : mac.c_str(), kind.c_str(), rs.c_str(),
          (unsigned)client->getMTU(), uuidInfo.c_str(),
          relaxed ? ", slow connection parameters" : "");
   }
@@ -349,7 +415,9 @@ class ScanCb : public NimBLEScanCallbacks {
 };
 static ScanCb scanCb;
 
-std::vector<ScanEntry> scan(uint32_t ms) {
+std::vector<ScanEntry> scan(uint32_t ms) { return scanFor(ms); }
+
+static std::vector<ScanEntry> scanFor(uint32_t ms) {
   std::vector<ScanEntry> out;
   NimBLEScan* sc = NimBLEDevice::getScan();
   {

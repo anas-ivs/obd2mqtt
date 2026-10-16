@@ -15,6 +15,7 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 ## Features
 
 - **Two cars**: one dongle per car, each with its own profile, MQTT base topic and Home Assistant device (one BLE connection at a time)
+- Dongle found by MAC or by Bluetooth name (for dongles whose MAC changes on every power-up, e.g. vLinker MC+)
 - BLE client for ELM327 dongles (auto-detects common UUIDs: FFF0, FFE0, 18F0, vLinker; can be overridden manually)
 - Vehicle profiles as JSON (pre-installed: Hyundai IONIQ 5, Kia EV6), editable in the web UI
 - Web interface and built-in manual (English), backup/restore of all settings, log with real time (NTP)
