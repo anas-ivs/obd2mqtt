@@ -3,6 +3,17 @@
 #include <ArduinoJson.h>
 #include <vector>
 
+// Highest Bluetooth transmit power the chip supports (dBm) – classic ESP32 +9, ESP32-S3/C3 up to +20
+#if CONFIG_IDF_TARGET_ESP32
+#define BLE_TX_MAX 9
+#else
+#define BLE_TX_MAX 20
+#endif
+
+#ifndef FW_BOARD
+#define FW_BOARD "esp32dev"   // build environment, part of the release file name
+#endif
+
 
 // ---------- Per-car settings (one dongle per car) ----------
 static const int NCARS = 2;
@@ -44,11 +55,21 @@ struct AppConfig {
   float minVoltage = 12.2f;             // 12V protection, 0 = off
   float sleepVoltage = 13.2f;           // below this the car is considered asleep → no CAN queries (0 = off)
   uint32_t sleepPollMin = 0;            // poll anyway while the car sleeps: every N min (0 = never)
+  uint32_t sleepCheckMin = 30;          // while asleep: check only the 12 V voltage every N min (doesn't wake the car)
   float lowBattVoltage = 12.0f;         // 12V warning (HA sensor "12V low"), 0 = off
   uint32_t retrySec = 60;               // Pause after a failed BLE connection
   uint32_t cmdTimeoutMs = 3000;
   bool keepConnected = false;           // Keep BLE connected between polls
+  int bleTxPower = 9;                   // Bluetooth transmit power in dBm (classic ESP32: max 9, S3/C3: up to 20)
   uint32_t backoffSec = 600;            // Pause when the car does not respond (0 = off)
+
+  // Status LED (WS2812 RGB): GPIO of the board's LED (-1 = none), brightness 0–100 % (0 = off)
+#ifdef PIN_NEOPIXEL
+  int ledPin = PIN_NEOPIXEL;            // ESP32-S3 DevKitC: 48 (some boards 38), ESP32-C3: 8
+#else
+  int ledPin = -1;                      // classic ESP32 boards have no RGB LED
+#endif
+  int ledBrightness = 20;
 
   // Time & log
   String ntpServer = "pool.ntp.org";

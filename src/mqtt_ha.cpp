@@ -92,7 +92,7 @@ void publishProfile(int car) {
 static const char* const FIXED[][2] = {   // fixed per-car entities: component, object id
   {"sensor", "voltage_12v"}, {"binary_sensor", "car"}, {"binary_sensor", "car_awake"},
   {"binary_sensor", "battery_low"}, {"switch", "polling"}, {"sensor", "ble_rssi"},
-  {"sensor", "last_error"}, {"sensor", "profile"}, {"sensor", "last_data"}};
+  {"sensor", "last_error"}, {"sensor", "profile"}, {"sensor", "last_data"}, {"button", "check_now"}};
 
 static void removeCar(int car) {
   for (auto& id : announced[car]) removeConfig(car, "sensor", id);
@@ -104,6 +104,7 @@ static void removeCar(int car) {
 static size_t sendCarDiscovery(int car) {
   const Profile& prof = profiles[car];
   mqtt.subscribe(carTopic(car, "polling/set").c_str());
+  mqtt.subscribe(carTopic(car, "check/set").c_str());
   std::vector<String> now;
   for (auto& p : prof.pids) {
     JsonDocument d;
@@ -183,6 +184,14 @@ static size_t sendCarDiscovery(int car) {
     d["entity_category"] = "diagnostic";
     publishConfig(car, "sensor", "ble_rssi", d);
   }
+  { // Check now: voltage check right away, polls only if the car is awake (doesn't wake a sleeping car)
+    JsonDocument d;
+    d["name"] = "Check now";
+    d["command_topic"] = carTopic(car, "check/set");
+    d["payload_press"] = "PRESS";
+    d["icon"] = "mdi:car-search";
+    publishConfig(car, "button", "check_now", d);
+  }
   { // Last data: time of the last successful poll (retained; not touched by bridge restarts)
     JsonDocument d;
     d["name"] = "Last data";
@@ -253,7 +262,9 @@ static void onMessage(char* t, byte* payload, unsigned int len) {
     return;
   }
   for (int i = 0; i < NCARS; i++) {
-    if (!cfg.cars[i].enabled || tp != carTopic(i, "polling/set")) continue;
+    if (!cfg.cars[i].enabled) continue;
+    if (tp == carTopic(i, "check/set")) { Poller::requestCheckNow(i); continue; }
+    if (tp != carTopic(i, "polling/set")) continue;
     bool on = v == "ON" || v == "1" || v == "TRUE";
     if (on || v == "OFF" || v == "0" || v == "FALSE") Poller::requestEnabled(i, on);
   }

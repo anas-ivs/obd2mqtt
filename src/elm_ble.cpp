@@ -3,6 +3,7 @@
 #include <mutex>
 #include <map>
 #include "config.h"
+#include "led.h"
 #include "log.h"
 #include "watchdog.h"
 
@@ -105,7 +106,12 @@ static ClientCb clientCb;
 void begin() {
   NimBLEDevice::init("obd2mqtt");
   NimBLEDevice::setMTU(247);   // larger packets: long responses (multi-frame) in fewer notifications
-  NimBLEDevice::setPower(9);   // max. TX power (dBm), helps for garage → car
+  setTxPower(cfg.bleTxPower);  // range garage → car (setting; +9 dBm is the classic ESP32's maximum)
+}
+
+void setTxPower(int dbm) {
+  dbm = constrain(dbm, 0, BLE_TX_MAX);
+  if (!NimBLEDevice::setPower(dbm)) logf("BLE: transmit power %d dBm not accepted", dbm);
 }
 
 void shutdown() {
@@ -231,6 +237,7 @@ bool connect(const CarConfig& car, String& err) {
     err = car.bleMatch == "name" ? "No dongle name configured" : "No valid BLE MAC configured";
     return false;
   }
+  Led::setActivity(Led::CONNECTING);
   const bool byName = car.bleMatch == "name";
   String mac = car.bleMac;
   std::vector<uint8_t> types;
@@ -372,6 +379,7 @@ bool connect(const CarConfig& car, String& err) {
 bool command(const String& cmd, String& response, uint32_t timeoutMs) {
   response = "";
   if (!connected() || !chrWrite) return false;
+  Led::setActivity(Led::POLLING);
   drain(30, 300);                        // wait out leftovers of the previous response
   {
     std::lock_guard<std::mutex> lk(rxMutex);
@@ -396,6 +404,7 @@ bool command(const String& cmd, String& response, uint32_t timeoutMs) {
   }
   std::lock_guard<std::mutex> lk(rxMutex);
   response = rxBuf;
+  if (rxPrompt) Led::reply();
   return rxPrompt;
 }
 

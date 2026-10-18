@@ -4,6 +4,7 @@
 #include <ESPmDNS.h>
 #include <DNSServer.h>
 #include "config.h"
+#include "led.h"
 #include "log.h"
 #include "mqtt_ha.h"
 #include "poller.h"
@@ -177,6 +178,7 @@ void setup() {
   timeInit(cfg.tz.c_str());
   logf("OBD2MQTT %s start", FW_VERSION);
   if (!fsOk) logf("LittleFS error!");
+  Led::begin();
   Watchdog::begin();
   logBootCheck(Watchdog::crashCount());
   if (!cfgOk) logf("%s", "No configuration – using defaults");
@@ -197,6 +199,8 @@ void loop() {
   wifiLoop();
   Watchdog::loop(cfg.wifiSsid.isEmpty() || WiFi.status() == WL_CONNECTED, cfg.mqttHost.length() > 0, MqttHa::connected(),
                  apActive && WiFi.softAPgetStationNum() > 0);
+  Led::setNet(WiFi.status() == WL_CONNECTED, apActive, cfg.mqttHost.length() > 0 && !MqttHa::connected(),
+              Watchdog::safeMode());
   Watchdog::step("MQTT");
   MqttHa::loop();
   Watchdog::step("Poller");

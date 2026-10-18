@@ -1,5 +1,31 @@
 [
  {
+  "v": "0.7.1",
+  "en": [
+   "Status LED (RGB LED on ESP32-S3/C3 boards): blue blinking = connecting, green = polling (flash per reply), dim green = idle, short blue pulse = car asleep, yellow = dongle not found / no data, orange = MQTT down, white / purple blinking = no WiFi / setup hotspot, cyan = firmware update, red blinking = safe mode",
+   "Settings → Status LED: GPIO (default 48 on the S3, 8 on the C3, none on the classic ESP32), brightness, and a Test button that lights a GPIO red, green, blue to find the board's LED"
+  ]
+ },
+ {
+  "v": "0.7.0",
+  "en": [
+   "New web interface layout, made for phones: tab bar at the bottom on phones, at the top on wide screens",
+   "Status: the live log comes first (car names in colour, errors in red, “Full log” for more lines); each car card shows its state (Asleep / Awake / AC or DC charging), last data and three tiles – 12V, SoC, Charging – with “Show all values” for the rest; OBD connection, Check now, Poll now and the Polling switch at the bottom of the card",
+   "Diagnostics moved to the System tab; the car dropdown in the header is gone – Terminal, Test and Diagnostics each have their own car choice",
+   "ESP32-S3 support: own firmware files (…-esp32s3-ota.bin / -factory.bin); the build now also creates a factory.bin for the first USB flash",
+   "Settings → Bluetooth transmit power (ESP32: up to +9 dBm, ESP32-S3: up to +20 dBm) for more range",
+   "Firmware upload refuses files built for another chip; the online update only installs files for this board"
+  ]
+ },
+ {
+  "v": "0.6.3",
+  "en": [
+   "While the car is asleep the 12 V is checked every 30 min instead of every minute (setting “Check 12V while car is asleep every”)",
+   "New Home Assistant button “Check now” per car (and on the Status card): checks the 12 V right away; an awake car (e.g. AC charging) is polled immediately, a sleeping car is not woken. Use it in an automation, e.g. when the charger starts",
+   "“Poll now” is unchanged: it wakes the car for one full poll"
+  ]
+ },
+ {
   "v": "0.6.2",
   "en": [
    "New Home Assistant sensor “Last data” per car: time of the last poll that delivered values. Bridge restarts no longer look like fresh data",

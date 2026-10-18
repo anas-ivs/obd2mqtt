@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 #include "config.h"
+#include "led.h"
 #include "log.h"
 #include "poller.h"
 #include "online_update.h"
@@ -433,6 +434,20 @@ void begin() {
     sendMsg(r, true, "Poll triggered");
   });
 
+  server.on("/api/checknow", HTTP_POST, [](AsyncWebServerRequest* r) {
+    if (!auth(r)) return;
+    Poller::requestCheckNow(carParam(r, 0));
+    sendMsg(r, true, "Check started");
+  });
+
+  server.on("/api/ledtest", HTTP_POST, [](AsyncWebServerRequest* r) {
+    if (!auth(r)) return;
+    int pin = r->hasParam("pin") ? r->getParam("pin")->value().toInt() : cfg.ledPin;
+    if (!Led::pinOk(pin)) { sendMsg(r, false, "GPIO not usable for the LED"); return; }
+    Led::test(pin);
+    sendMsg(r, true, "LED test: red, green, blue");
+  });
+
   server.on("/api/diag", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (!auth(r)) return;
     AsyncWebServerResponse* res = r->beginChunkedResponse("text/plain; charset=utf-8", [](uint8_t* buf, size_t maxLen, size_t index) -> size_t {
@@ -514,10 +529,16 @@ void begin() {
         Poller::setPaused(true, true);   // no BLE while flashing – Bluetooth stack off to lower the current
         logf("OTA update started: %s (%u bytes)", fn.c_str(), (unsigned)otaTotal);
         if (Update.isRunning()) Update.abort();       // leftovers from an aborted attempt
+        uint16_t chip = len >= 14 ? (uint16_t)(data[12] | (data[13] << 8)) : 0xFFFF;
         if (len && data[0] != 0xE9) {
           otaError = fn.indexOf("factory") >= 0
                        ? "This is the factory.bin – please use the *-ota.bin for OTA"
                        : "Not a valid ESP32 firmware (wrong magic byte)";
+          otaState = 3;
+        } else if (len >= 14 && chip != CONFIG_IDF_FIRMWARE_CHIP_ID) {
+          // e.g. a classic-ESP32 file on an ESP32-S3: the board would not start it
+          otaError = String("Firmware for another chip (file: ") + chip + ", this board: " + CONFIG_IDF_FIRMWARE_CHIP_ID +
+                     ") – use the *-" FW_BOARD "-ota.bin";
           otaState = 3;
         } else if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
           otaError = Update.errorString();

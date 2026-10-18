@@ -16,7 +16,8 @@ void loop();
 // Calls from the web task
 void requestConfigApply(const String& json);  // applies + saves configuration
 void requestProfileReload();                  // reload the profiles of both cars
-void requestPollNow(int car = -1);            // -1 = all cars
+void requestPollNow(int car = -1);            // -1 = all cars; wakes a sleeping car for one full poll
+void requestCheckNow(int car);                // check the 12 V now (no waiting); polls only if the car is awake
 String lastErrorText(int car);                // current "last error" of a car (empty = none)
 void requestEnabled(int car, bool on);        // polling switch of a car (web/MQTT) – saved in loop()
 void setPaused(bool p, bool bleOff = false); // e.g. during OTA; bleOff: also switch the Bluetooth stack off

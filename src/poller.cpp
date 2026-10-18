@@ -7,6 +7,7 @@
 #include <vector>
 #include "config.h"
 #include "elm_ble.h"
+#include "led.h"
 #include "log.h"
 #include "mqtt_ha.h"
 #include "obd_parse.h"
@@ -47,6 +48,7 @@ struct Car {
   int cacheRssi = 0;
   volatile bool flagReload = false;
   volatile bool flagPollNow = false;
+  volatile bool flagCheckNow = false;
   volatile int pendingEnable = -1;
 };
 static Car cars[NCARS];
@@ -59,6 +61,9 @@ static ObdParse::ErrKind lastQueryKind = ObdParse::ERR_NONE;   // error kind of 
 static bool cacheMqtt = false;
 static size_t cacheFsUsed = 0, cacheFsTotal = 0;   // LittleFS.usedBytes() walks the FS → refreshed once a minute
 static String pendingConfig;          // under mtx (from the web task)
+static bool bleOn = true;              // false = safe mode (no Bluetooth)
+static volatile bool paused = false;  // firmware update running
+static volatile bool bleOffRequested = false, bleIsOff = false;
 
 // Job
 struct Job {
@@ -339,11 +344,12 @@ static void pollDue() {
   if (!ensureReady(err)) {
     MqttHa::publishText(C->idx, "car", "offline");
     if (!cfg.keepConnected || !linkUp()) dropLink();
-    C->nextConnectTry = millis() + cfg.retrySec * 1000UL;
-    // When the car sleeps, the dongle (e.g. WiCAN) often sleeps too → don't repeat the same message every minute
-    if (C->carAsleep && cfg.sleepVoltage > 0) {
+    const bool asleep = C->carAsleep && cfg.sleepVoltage > 0;
+    C->nextConnectTry = millis() + (asleep ? cfg.sleepCheckMin * 60000UL : cfg.retrySec * 1000UL);
+    // When the car sleeps, the dongle (e.g. WiCAN) often sleeps too → don't repeat the same message every time
+    if (asleep) {
       if (!C->unreachLogged)
-        clog("BLE: %s – dongle probably sleeps with the car, checking every minute (not reported again)", err.c_str());
+        clog("BLE: %s – dongle probably sleeps with the car, checking every %lu min (not reported again)", err.c_str(), (unsigned long)cfg.sleepCheckMin);
       C->unreachLogged = true;
     } else
       clog("BLE: %s – retry in %lus", err.c_str(), (unsigned long)cfg.retrySec);
@@ -381,7 +387,7 @@ static void pollDue() {
   // Voltage unreadable: keep the last state (better not to poll than to wake the car)
   if (cfg.sleepVoltage > 0 && isnan(v) && C->carAsleep && !force) {
     if (!cfg.keepConnected) dropLink();
-    C->nextConnectTry = now + 60000UL;
+    C->nextConnectTry = now + cfg.sleepCheckMin * 60000UL;
     return;
   }
   // 12V warning (with 0.2 V hysteresis), independent of sleep mode
@@ -428,7 +434,7 @@ static void pollDue() {
                           (C->lastSleepPoll == 0 || now - C->lastSleepPoll >= cfg.sleepPollMin * 60000UL);
       if (!sleepPollDue) {
         if (!cfg.keepConnected) dropLink();
-        C->nextConnectTry = now + 60000UL;   // check only the voltage again in 1 min (doesn't wake the car)
+        C->nextConnectTry = now + cfg.sleepCheckMin * 60000UL;   // check only the voltage again later (doesn't wake the car)
         return;
       }
       C->lastSleepPoll = now;
@@ -857,6 +863,8 @@ void requestPollNow(int car) {
     if (car < 0 || c.idx == car) { c.forcePoll = true; c.flagPollNow = true; }
 }
 
+void requestCheckNow(int car) { cars[constrain(car, 0, NCARS - 1)].flagCheckNow = true; }
+
 void requestEnabled(int car, bool on) { cars[constrain(car, 0, NCARS - 1)].pendingEnable = on ? 1 : 0; }
 
 static void applyEnable() {
@@ -905,10 +913,13 @@ static void applyPendingConfig() {
       MqttHa::requestDiscovery();
   }
   if (before.sleepVoltage != cfg.sleepVoltage || before.lowBattVoltage != cfg.lowBattVoltage) MqttHa::requestDiscovery();
+  if (before.bleTxPower != cfg.bleTxPower && bleOn && !paused) {
+    ElmBle::setTxPower(cfg.bleTxPower);
+    logf("Bluetooth transmit power %d dBm", cfg.bleTxPower);
+  }
   // Wi-Fi/MQTT changes take effect via reboot from the web UI
 }
 
-static bool bleOn = true;
 void begin(bool bleEnabled) {
   for (int i = 0; i < NCARS; i++) cars[i].idx = i;
   bleOn = bleEnabled;
@@ -916,6 +927,7 @@ void begin(bool bleEnabled) {
   for (int i = 0; i < NCARS; i++) reloadProfile(i);
 }
 
+static bool pollable(Car& c);
 static void updateCache() {
   bool m = MqttHa::connected();
   static uint32_t lastInfo = 0, lastFs = 0;
@@ -943,15 +955,24 @@ static void updateCache() {
     }
   }
   if (fs) { cacheFsUsed = fu; cacheFsTotal = ft; }
+  // Status LED: activity of the connection, otherwise a summary of the cars
+  Led::setActivity(connectedCar >= 0 ? Led::CONNECTED : Led::IDLE);
+  bool fault = false, asleep = false;
+  for (auto& c : cars) {
+    if (!pollable(c)) continue;
+    bool sl = c.carAsleep && cfg.sleepVoltage > 0;
+    asleep |= sl;
+    fault |= !sl && !c.lastError.isEmpty();
+  }
+  Led::setCars(fault, asleep);
 }
 
-static volatile bool paused = false;
-static volatile bool bleOffRequested = false, bleIsOff = false;
 bool isPaused() { return paused || !bleOn; }
 bool bleStopped() { return bleIsOff; }
 void setPaused(bool p, bool bleOff) {
   if (p && bleOff) bleOffRequested = true;
   paused = p;
+  Led::setUpdate(p);
   if (p) logf("%s", "Polling paused (firmware update)");
 }
 
@@ -982,6 +1003,17 @@ void loop() {
   runJob();
 
   uint32_t now = millis();
+  // "Check now" (HA button): next voltage check right away. Unlike "Poll now" the sleep check stays active,
+  // so a sleeping car is not woken – an awake (e.g. AC charging) car is polled immediately.
+  for (auto& c : cars) {
+    if (!c.flagCheckNow) continue;
+    c.flagCheckNow = false;
+    if (!pollable(c)) continue;
+    std::lock_guard<std::mutex> lk(mtx);
+    for (auto& s : c.states) s.lastPoll = 0;
+    c.nextConnectTry = 0;
+    logf("[%s] Check now (Home Assistant / web)", carName(c.idx).c_str());
+  }
   for (auto& c : cars) {
     if (!c.flagPollNow) continue;
     if (!pollable(c)) { c.flagPollNow = false; c.forcePoll = false; continue; }   // disabled / no dongle
@@ -1024,6 +1056,8 @@ void statusJson(JsonDocument& d) {
   // so the web task holds the mutex only for the short state copy
   uint32_t now = millis();
   d["fw"] = FW_VERSION;
+  d["board"] = FW_BOARD;
+  d["ble_tx_max"] = BLE_TX_MAX;
   d["uptime"] = now / 1000;
   d["heap"] = ESP.getFreeHeap();
   d["heap_min"] = ESP.getMinFreeHeap();

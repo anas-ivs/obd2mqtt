@@ -123,7 +123,8 @@ static void doCheck() {
   uint32_t size = 0;
   for (JsonObject a : d["assets"].as<JsonArray>()) {
     String n = a["name"] | "";
-    if (n.endsWith("-esp32-ota.bin")) { url = a["browser_download_url"] | ""; size = a["size"] | 0; break; }
+    // only firmware built for this chip (release file obd2mqtt-vX.Y.Z-<board>-ota.bin)
+    if (n.endsWith("-" FW_BOARD "-ota.bin")) { url = a["browser_download_url"] | ""; size = a["size"] | 0; break; }
   }
   body.replace("\r", "");
   String nn = newerNotes(body);
@@ -140,7 +141,7 @@ static void doCheck() {
     assetSize = size;
     checkedAt = ts;
     if (!newer) { state = "uptodate"; error = ""; }
-    else if (url.isEmpty()) { state = "error"; error = String("Release ") + tag + " contains no *-esp32-ota.bin"; }
+    else if (url.isEmpty()) { state = "error"; error = String("Release ") + tag + " contains no *-" FW_BOARD "-ota.bin"; }
     else { state = "available"; error = ""; }
   }
   if (newer && announced != tag) {

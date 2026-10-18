@@ -9,6 +9,7 @@ namespace ElmBle {
 struct ScanEntry { String mac, name; int rssi; bool addrRandom; bool likelyObd; };
 
 void begin();
+void setTxPower(int dbm);            // Bluetooth transmit power (dBm), clamped to what the chip supports
 void shutdown();                    // turn Bluetooth off completely (frees RAM, e.g. for the online update)
 bool connect(const CarConfig& car, String& err);   // that car's dongle (MAC/UUIDs/PIN); disconnects any other first
 void disconnect();

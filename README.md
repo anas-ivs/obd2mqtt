@@ -27,6 +27,7 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 - Setup access point with captive portal, mDNS (`http://obd2mqtt.local`), OTA updates, optional password protection
 - **Online update** from the GitHub releases: daily check, changelog of the new version, install with one click (web interface or Home Assistant update entity)
 - Watchdog with automatic restart and safe mode
+- **Status LED** on ESP32-S3/C3 boards (RGB): blue = connecting, green = polling / idle, blue pulse = car asleep, yellow = dongle not found, orange = MQTT down, cyan = update, red = safe mode (Settings → Status LED, with a Test button to find the GPIO)
 - **Diagnostic report** (one click, copy/download, no WiFi/IP/passwords) and a 2-hour diagnostic log – ideal for beta testers
 
 ## What you need
@@ -37,18 +38,24 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 
 ## Flashing
 
-**Option A – no toolchain (classic ESP32):**
-Download `obd2mqtt-vX.Y.Z-esp32-factory.bin` from [Releases](../../releases/latest) and flash it at **address 0x0** with a web flasher in Chrome/Edge (e.g. https://espressif.github.io/esptool-js/).
+Each board has its own firmware files (`<board>` = `esp32dev` for the classic ESP32, `esp32s3` for ESP32-S3 boards):
 
-**Option B – PlatformIO (all boards):**
+- `obd2mqtt-vX.Y.Z-<board>-factory.bin` – complete image for the **first flash over USB**, at **address 0x0**
+- `obd2mqtt-vX.Y.Z-<board>-ota.bin` – for later updates via web UI → System → Firmware update
+
+The web upload refuses a file built for another chip.
+
+**Option A – no toolchain:** flash the factory.bin at **address 0x0** with a web flasher in Chrome/Edge (e.g. https://espressif.github.io/esptool-js/). On ESP32-S3 boards with two USB-C ports use the one marked UART/COM; if the board is not detected, hold BOOT while plugging it in.
+
+**Option B – PlatformIO:**
 ```bash
 pio run -e esp32dev -t upload      # classic ESP32
 pio run -e esp32s3 -t upload       # ESP32-S3
-pio run -e esp32c3 -t upload       # ESP32-C3
+pio run -e esp32c3 -t upload       # ESP32-C3 (not tested)
 pio device monitor
 ```
 
-Later updates: web UI → System → Firmware update with `obd2mqtt-vX.Y.Z-esp32-ota.bin` from the releases (after `pio run` it is copied to `firmware/obd2mqtt-vX.Y.Z-<env>-ota.bin` automatically).
+After `pio run` both files are copied to `firmware/` automatically. To move to a new board: on the old board download a backup (System → Backup & restore, incl. passwords), flash the new board, connect to its setup WiFi and restore the backup.
 
 ## First setup
 
@@ -124,6 +131,7 @@ Each car has its own base topic (Settings → Cars, default `obd2mqtt/car1` and 
 | `<car base>/car_awake` | `ON` / `OFF` – car awake (12 V above the sleep threshold, i.e. DC/DC converter active) |
 | `<car base>/ble_rssi` | BLE signal strength |
 | `<car base>/last_error` | last error |
+| `<car base>/check/set` | `PRESS` → check the 12 V now; polls only if the car is awake (HA button “Check now”) |
 | `<car base>/last_data` | time (UTC, ISO 8601) of the last poll that delivered values – HA timestamp sensor “Last data” |
 | `<car base>/profile` | name of the car's vehicle profile, e.g. `Hyundai IONIQ 5` (retained) |
 | `<car base>/profile/attributes` | details as JSON: `{"id":"ioniq5","name":"Hyundai IONIQ 5","model":"…","active_pids":[…],"firmware":"…"}` |
@@ -155,6 +163,7 @@ src/elm_ble.*           BLE connection, UUID detection, ELM commands, scan
 src/obd_parse.*         response parser (single/multi-frame) and formula evaluation
 src/poller.*            poll scheduler, 12 V protection, jobs from the web UI
 src/mqtt_ha.*           MQTT and Home Assistant discovery
+src/led.*               status LED (WS2812 via RMT, own task)
 src/web.*, web_ui.h     REST API and web interface
 scripts/gen_web_assets.py  gzips web_ui.h / help_ui.h into src/web_assets.h before each build
 src/help_ui.h           built-in manual
