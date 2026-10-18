@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.7.9
+- Manual (Help): new section “Status LED” with all colours, and an updated “How often is polled?” (charging / awake / asleep / dongle not found intervals); old language-switch row removed
+- Settings → Status LED: colour legend instead of the long hint text
+
+## 0.7.8
+- One button instead of two: “Check now” is merged into “Poll now” (Status card and Home Assistant). In HA the existing button keeps its entity id and is now named “Poll now” – automations keep working. Works even with the Polling switch off
+
+## 0.7.7
+- “Poll now” no longer wakes a sleeping car: below the sleep voltage only the 12 V is checked (log: “car is asleep … not woken”); an awake car is polled in full as before
+
+## 0.7.6
+- Car card: the next poll / 12V check is shown on its own line under the OBD line, so it fits on phones
+
+## 0.7.5
+- Awake but not charging: 3 polls every 5 min, then every 30 min (settings “Awake, not charging: polls at that interval, then slower” and “… then poll every”). Charging starting or stopping, the car waking up, Check now and Poll now start the count again; the log notes the switch
+
+## 0.7.4
+- Car card shows when the car is served next: “next poll 20:05 (in 4 min 12 s) · every 5 min”, “every 1 min (charging)”, “next 12V check …” while asleep, “next attempt …” when the dongle was not found, “retry 1/2 …” after a failed setup, or “polling off” – counts down every second
+- New Home Assistant sensor “Next poll” per car (timestamp)
+
+## 0.7.3
+- “Subscribe failed” (dongle connected but refused the notification setup): retried after 60 s, up to 2 times, instead of waiting 30 min – the dongle is clearly in range. The log now shows the signal strength (RSSI) with this error
+- MQTT keepalive 60 s (was 30 s): a hanging Bluetooth step (up to 30 s) no longer makes the broker drop the connection
+
+## 0.7.2
+- New poll intervals in Settings → Polling, for both cars: every 60 s while charging (AC or DC, from the PIDs “charging” / “charging_dc”), every 300 s when awake and not charging. PIDs with a longer profile interval (odometer, SOH) keep theirs; 0 = use the profile intervals
+- Dongle not found: next attempt after 30 min (setting, replaces “Reconnect attempt after” 60 s). “Check now” in Home Assistant still connects immediately
+- Log shows when a car starts or stops charging and the interval used
+
 ## 0.7.1
 - Status LED (RGB LED on ESP32-S3/C3 boards): blue blinking = connecting, green = polling (flash per reply), dim green = idle, short blue pulse = car asleep, yellow = dongle not found / no data, orange = MQTT down, white / purple blinking = no WiFi / setup hotspot, cyan = firmware update, red blinking = safe mode
 - Settings → Status LED: GPIO (default 48 on the S3, 8 on the C3, none on the classic ESP32), brightness, and a Test button that lights a GPIO red, green, blue to find the board's LED

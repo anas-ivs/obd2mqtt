@@ -33,6 +33,7 @@ static bool rxContent = false;          // real response characters received yet
 static volatile uint32_t rxLastMs = 0;
 static volatile uint32_t strayPrompts = 0;
 static volatile uint32_t drops = 0;        // unplanned disconnects (not 0x216)
+static bool inRange = false;             // last connect() failed after the link was up (dongle in range)
 static volatile uint8_t fastDrops = 0;     // 0x208 drops with short connection interval
 static volatile bool relaxed = false;      // true = slower default connection parameters
 static bool pairLogged = false;            // log "pairing OK" only the first time or after an error
@@ -230,6 +231,8 @@ static bool findByName(const String& name, String& mac, uint8_t& type) {
   return false;
 }
 
+bool lastFailInRange() { return inRange; }
+
 bool connect(const CarConfig& car, String& err) {
   if (connectedTo(car)) return true;
   disconnect();   // also when the other car's dongle is connected: only one connection at a time
@@ -238,6 +241,7 @@ bool connect(const CarConfig& car, String& err) {
     return false;
   }
   Led::setActivity(Led::CONNECTING);
+  inRange = false;
   const bool byName = car.bleMatch == "name";
   String mac = car.bleMac;
   std::vector<uint8_t> types;
@@ -323,6 +327,7 @@ bool connect(const CarConfig& car, String& err) {
                  : String("Dongle not reachable (car away / dongle asleep?)");
     return fail();
   }
+  inRange = true;   // link is up: any failure from here on means the dongle is there
 
   if (!step("BLE MTU")) return fail();
   client->exchangeMTU();
@@ -334,6 +339,7 @@ bool connect(const CarConfig& car, String& err) {
                                     : chrNotify->subscribe(false, onNotify);
   if (!sub) {
     if (err.isEmpty()) err = "Subscribe failed";
+    if (client->isConnected()) err += String(" (RSSI ") + client->getRssi() + " dBm)";
     return fail();
   }
   writeWithResponse = !chrWrite->canWriteNoResponse();

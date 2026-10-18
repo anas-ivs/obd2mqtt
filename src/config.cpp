@@ -87,7 +87,11 @@ void configToJson(JsonDocument& d, bool mask) {
   d["sleep_poll_min"] = cfg.sleepPollMin;
   d["sleep_check_min"] = cfg.sleepCheckMin;
   d["low_batt_voltage"] = cfg.lowBattVoltage;
-  d["retry_sec"] = cfg.retrySec;
+  d["charge_interval_sec"] = cfg.chargeIntervalSec;
+  d["normal_interval_sec"] = cfg.normalIntervalSec;
+  d["dongle_retry_min"] = cfg.dongleRetryMin;
+  d["awake_fast_polls"] = cfg.awakeFastPolls;
+  d["awake_slow_sec"] = cfg.awakeSlowSec;
   d["cmd_timeout_ms"] = cfg.cmdTimeoutMs;
   d["keep_connected"] = cfg.keepConnected;
   d["ble_tx_power"] = cfg.bleTxPower;
@@ -173,7 +177,11 @@ void configFromJson(JsonVariantConst s) {
   if (s["low_batt_voltage"].is<float>()) cfg.lowBattVoltage = constrain(s["low_batt_voltage"].as<float>(), 0.0f, 15.0f);
   if (s["sleep_poll_min"].is<int>()) cfg.sleepPollMin = max(0, s["sleep_poll_min"].as<int>());
   if (s["sleep_check_min"].is<int>()) cfg.sleepCheckMin = constrain(s["sleep_check_min"].as<int>(), 1, 240);
-  if (s["retry_sec"].is<int>()) cfg.retrySec = max(10, s["retry_sec"].as<int>());
+  if (s["charge_interval_sec"].is<int>()) cfg.chargeIntervalSec = constrain(s["charge_interval_sec"].as<int>(), 0, 86400);
+  if (s["normal_interval_sec"].is<int>()) cfg.normalIntervalSec = constrain(s["normal_interval_sec"].as<int>(), 0, 86400);
+  if (s["awake_fast_polls"].is<int>()) cfg.awakeFastPolls = constrain(s["awake_fast_polls"].as<int>(), 0, 100);
+  if (s["awake_slow_sec"].is<int>()) cfg.awakeSlowSec = constrain(s["awake_slow_sec"].as<int>(), 0, 86400);
+  if (s["dongle_retry_min"].is<int>()) cfg.dongleRetryMin = constrain(s["dongle_retry_min"].as<int>(), 1, 240);
   if (s["cmd_timeout_ms"].is<int>()) cfg.cmdTimeoutMs = constrain(s["cmd_timeout_ms"].as<int>(), 500, 15000);
   if (s["keep_connected"].is<bool>()) cfg.keepConnected = s["keep_connected"];
   if (s["ble_tx_power"].is<int>()) cfg.bleTxPower = constrain(s["ble_tx_power"].as<int>(), 0, BLE_TX_MAX);

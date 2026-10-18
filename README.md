@@ -131,8 +131,9 @@ Each car has its own base topic (Settings → Cars, default `obd2mqtt/car1` and 
 | `<car base>/car_awake` | `ON` / `OFF` – car awake (12 V above the sleep threshold, i.e. DC/DC converter active) |
 | `<car base>/ble_rssi` | BLE signal strength |
 | `<car base>/last_error` | last error |
-| `<car base>/check/set` | `PRESS` → check the 12 V now; polls only if the car is awake (HA button “Check now”) |
+| `<car base>/check/set` | `PRESS` → check the 12 V now; polls all values only if the car is awake, never wakes a sleeping car (HA button “Poll now”) |
 | `<car base>/last_data` | time (UTC, ISO 8601) of the last poll that delivered values – HA timestamp sensor “Last data” |
+| `<car base>/next_poll` | time (UTC, ISO 8601) the car is served next (poll, 12 V check or reconnect), `None` = polling off – HA timestamp sensor “Next poll” |
 | `<car base>/profile` | name of the car's vehicle profile, e.g. `Hyundai IONIQ 5` (retained) |
 | `<car base>/profile/attributes` | details as JSON: `{"id":"ioniq5","name":"Hyundai IONIQ 5","model":"…","active_pids":[…],"firmware":"…"}` |
 | `<car base>/state` | all current values as **one** JSON after every poll cycle: `{"car":"IONIQ 5","profile":"Hyundai IONIQ 5","profile_id":"ioniq5","time":"…","values":{"soc":71.5,…},"voltage_12v":12.6}` |

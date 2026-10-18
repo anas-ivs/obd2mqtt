@@ -35,11 +35,14 @@ struct Car {
   float lastVoltage = NAN;
   bool carAsleep = false;             // 12V below sleepVoltage → car asleep, no CAN traffic
   uint32_t lastSleepPoll = 0;
-  bool forcePoll = false;             // "Poll now" bypasses sleep mode once
+  bool forcePoll = false;             // "Poll now" pending (only for the log – it never wakes a sleeping car)
+  uint8_t awakePolls = 0;             // polls with data while awake and not charging (fast → slow interval)
+  bool charging = false;              // last poll: PID "charging" or "charging_dc" = 1 → charging interval
   String lastError;
   uint32_t lastConnectOk = 0;
   uint32_t lastDataMs = 0;            // millis() of the last cycle with at least one valid value
   bool needWarmup = false;            // after connect/init: send 3E00 once before the first long query
+  uint8_t quickRetries = 0;           // retries after 60 s when the dongle was in range but setup failed
   bool unreachLogged = false;         // log "dongle sleeps with the car" only once
   uint32_t pollCycles = 0;
   int lowState = -1;                  // 12V warning state (-1 = unknown)
@@ -286,11 +289,37 @@ static void syncValues() {
   ObdParse::setBattery(p.batteryKwh, p.consumption);
 }
 
+// Interval of a PID: the charging / normal interval from the settings; PIDs with a longer profile
+// interval than the normal interval (odometer, SOH) keep their own. 0 = profile interval.
+static bool slowAwake(const Car& c) {
+  return !c.charging && cfg.awakeSlowSec && c.awakePolls >= cfg.awakeFastPolls;
+}
+static uint32_t intervalMs(const Car& c, const PidDef& p) {
+  uint32_t mode = c.charging ? cfg.chargeIntervalSec : slowAwake(c) ? cfg.awakeSlowSec : cfg.normalIntervalSec;
+  if (!mode || (cfg.normalIntervalSec && p.interval > cfg.normalIntervalSec)) return p.interval * 1000UL;
+  return mode * 1000UL;
+}
+
+// Charging state from the last values (PID ids "charging" / "charging_dc"); logs changes
+static void refreshCharging(Car& c) {
+  const Profile& prof = profiles[c.idx];
+  bool ch = false;
+  for (size_t i = 0; i < prof.pids.size() && i < c.states.size(); i++) {
+    const PidDef& p = prof.pids[i];
+    if (p.enabled && (p.id == "charging" || p.id == "charging_dc") && !isnan(c.states[i].value) && c.states[i].value >= 0.5) ch = true;
+  }
+  if (ch == c.charging) return;
+  c.charging = ch;
+  c.awakePolls = 0;   // fast polls again after charging starts or stops
+  uint32_t iv = ch ? cfg.chargeIntervalSec : cfg.normalIntervalSec;
+  if (iv) logf("[%s] %s – polling every %lu s", carName(c.idx).c_str(), ch ? "Charging" : "Not charging", (unsigned long)iv);
+}
+
 static bool isDue(Car& c, size_t i, uint32_t now) {
   const PidDef& p = profiles[c.idx].pids[i];
   if (!p.enabled || i >= c.states.size()) return false;
   const PidState& s = c.states[i];
-  return s.lastPoll == 0 || now - s.lastPoll >= p.interval * 1000UL;
+  return s.lastPoll == 0 || now - s.lastPoll >= intervalMs(c, p);
 }
 
 static uint32_t msUntilNextDue(Car& c, uint32_t now) {
@@ -301,10 +330,39 @@ static uint32_t msUntilNextDue(Car& c, uint32_t now) {
     if (!p.enabled) continue;
     const PidState& s = c.states[i];
     if (s.lastPoll == 0) return 0;
-    uint32_t el = now - s.lastPoll, iv = p.interval * 1000UL;
+    uint32_t el = now - s.lastPoll, iv = intervalMs(c, p);
     best = min(best, el >= iv ? 0 : iv - el);
   }
   return best;
+}
+
+// Time until the car is served next and why: off (polling switched off), check (asleep: 12 V check only),
+// quick (quick retry after a failed setup), retry (dongle not found), poll (next values due)
+static uint32_t msUntilNextPoll(Car& c, uint32_t now, const char*& why) {
+  const CarConfig& cc = cfg.cars[c.idx];
+  if (!cc.pollEnabled) { why = "off"; return UINT32_MAX; }
+  int32_t wait = (int32_t)(c.nextConnectTry - now);
+  uint32_t due = msUntilNextDue(c, now);
+  uint32_t ms = wait > 0 ? max((uint32_t)wait, due == UINT32_MAX ? 0 : due) : due;
+  if (c.carAsleep && cfg.sleepVoltage > 0) why = "check";
+  else if (wait > 0 && c.quickRetries) why = "quick";
+  else if (wait > 0 && !c.lastError.isEmpty()) why = "retry";
+  else why = "poll";
+  return ms;
+}
+
+// <car base>/next_poll (HA timestamp): when the car is served next ("None" = polling off)
+static void publishNextPoll(Car& c) {
+  if (!cfg.cars[c.idx].enabled || !timeValid()) return;
+  const char* why;
+  uint32_t ms = msUntilNextPoll(c, millis(), why);
+  if (ms == UINT32_MAX) { MqttHa::publishText(c.idx, "next_poll", "None"); return; }
+  time_t t = time(nullptr) + ms / 1000;
+  struct tm tmv;
+  gmtime_r(&t, &tmv);
+  char tb[32];
+  strftime(tb, sizeof(tb), "%Y-%m-%dT%H:%M:%S+00:00", &tmv);
+  MqttHa::publishText(c.idx, "next_poll", tb);
 }
 
 // All current values incl. profile as one JSON: <car base>/state
@@ -345,18 +403,29 @@ static void pollDue() {
     MqttHa::publishText(C->idx, "car", "offline");
     if (!cfg.keepConnected || !linkUp()) dropLink();
     const bool asleep = C->carAsleep && cfg.sleepVoltage > 0;
-    C->nextConnectTry = millis() + (asleep ? cfg.sleepCheckMin * 60000UL : cfg.retrySec * 1000UL);
+    // Dongle answered but the setup failed (e.g. subscribe): it is in range → up to 2 quick retries
+    if (ElmBle::lastFailInRange() && C->quickRetries < 2) {
+      C->quickRetries++;
+      C->nextConnectTry = millis() + 60000UL;
+      clog("BLE: %s – dongle in range, retry in 60 s (%u/2)", err.c_str(), (unsigned)C->quickRetries);
+      std::lock_guard<std::mutex> lk(mtx);
+      C->lastError = err;
+      return;
+    }
+    C->quickRetries = 0;
+    C->nextConnectTry = millis() + (asleep ? cfg.sleepCheckMin : cfg.dongleRetryMin) * 60000UL;
     // When the car sleeps, the dongle (e.g. WiCAN) often sleeps too → don't repeat the same message every time
     if (asleep) {
       if (!C->unreachLogged)
         clog("BLE: %s – dongle probably sleeps with the car, checking every %lu min (not reported again)", err.c_str(), (unsigned long)cfg.sleepCheckMin);
       C->unreachLogged = true;
     } else
-      clog("BLE: %s – retry in %lus", err.c_str(), (unsigned long)cfg.retrySec);
+      clog("BLE: %s – retry in %lu min", err.c_str(), (unsigned long)cfg.dongleRetryMin);
     std::lock_guard<std::mutex> lk(mtx);
     C->lastError = err;
     return;
   }
+  C->quickRetries = 0;
   if (C->unreachLogged) {
     C->unreachLogged = false;
     clog("%s", "Dongle reachable again");
@@ -385,7 +454,7 @@ static void pollDue() {
   bool force = C->forcePoll;
   C->forcePoll = false;
   // Voltage unreadable: keep the last state (better not to poll than to wake the car)
-  if (cfg.sleepVoltage > 0 && isnan(v) && C->carAsleep && !force) {
+  if (cfg.sleepVoltage > 0 && isnan(v) && C->carAsleep) {
     if (!cfg.keepConnected) dropLink();
     C->nextConnectTry = now + cfg.sleepCheckMin * 60000UL;
     return;
@@ -407,6 +476,7 @@ static void pollDue() {
     bool asleep = C->carAsleep ? (v < cfg.sleepVoltage + 0.1f) : (v < cfg.sleepVoltage);
     if (asleep != C->carAsleep) {
       C->carAsleep = asleep;
+      C->awakePolls = 0;
       ElmBle::quiet = asleep;
       MqttHa::publishText(C->idx, "car_awake", asleep ? "OFF" : "ON");
       if (asleep) {
@@ -428,7 +498,8 @@ static void pollDue() {
       else
         clog("Car awake (12V %.1f V) – normal polling", v);
     }
-    if (asleep && !force) {
+    if (asleep) {
+      if (force) clog("“Poll now” – car is asleep (12V %.1f V), only the voltage was checked – not woken", v);
       // Wake periodically only if the 12 V battery can handle it (like WiCAN: above 11.9 V)
       bool sleepPollDue = cfg.sleepPollMin > 0 && v > 11.9f &&
                           (C->lastSleepPoll == 0 || now - C->lastSleepPoll >= cfg.sleepPollMin * 60000UL);
@@ -439,8 +510,6 @@ static void pollDue() {
       }
       C->lastSleepPoll = now;
       clog("Polling while asleep (every %lu min)", (unsigned long)cfg.sleepPollMin);
-    } else if (asleep && force) {
-      clog("%s", "“Poll now” – car is asleep and will be woken up");
     }
   }
 
@@ -860,7 +929,11 @@ String lastErrorText(int car) {
 
 void requestPollNow(int car) {
   for (auto& c : cars)
-    if (car < 0 || c.idx == car) { c.forcePoll = true; c.flagPollNow = true; }
+    if ((car < 0 || c.idx == car) && cfg.cars[c.idx].enabled) {
+      c.forcePoll = true;
+      c.flagPollNow = true;
+      logf("[%s] Poll now (Home Assistant / web)", carName(c.idx).c_str());
+    }
 }
 
 void requestCheckNow(int car) { cars[constrain(car, 0, NCARS - 1)].flagCheckNow = true; }
@@ -879,6 +952,7 @@ static void applyEnable() {
     saveConfig();
     logf("[%s] %s", carName(c.idx).c_str(), on ? "Polling switched on" : "Polling switched off – no connection to the car");
     if (on) c.nextConnectTry = 0;
+    publishNextPoll(c);
   }
 }
 
@@ -1012,6 +1086,7 @@ void loop() {
     std::lock_guard<std::mutex> lk(mtx);
     for (auto& s : c.states) s.lastPoll = 0;
     c.nextConnectTry = 0;
+    c.awakePolls = 0;
     logf("[%s] Check now (Home Assistant / web)", carName(c.idx).c_str());
   }
   for (auto& c : cars) {
@@ -1020,6 +1095,7 @@ void loop() {
     std::lock_guard<std::mutex> lk(mtx);
     for (auto& s : c.states) s.lastPoll = 0;
     c.nextConnectTry = 0;
+    c.awakePolls = 0;
   }
 
   // Pick the car to serve: the connected car first (finish it), then round-robin from the last served car
@@ -1036,8 +1112,18 @@ void loop() {
   }
   if (pick >= 0) {
     C = &cars[pick];
-    cars[pick].flagPollNow = false;
+    Car& pc = cars[pick];
+    pc.flagPollNow = false;
+    const uint32_t data0 = pc.lastDataMs;
     pollDue();
+    refreshCharging(pc);
+    // Awake, not charging: count the polls with data; after awakeFastPolls switch to the slow interval
+    if (pc.lastDataMs != data0 && !pc.charging && !(pc.carAsleep && cfg.sleepVoltage > 0) && pc.awakePolls < 255) {
+      pc.awakePolls++;
+      if (cfg.awakeSlowSec && pc.awakePolls == cfg.awakeFastPolls)
+        logf("[%s] Awake, not charging – polling every %lu min", carName(pick).c_str(), (unsigned long)(cfg.awakeSlowSec / 60));
+    }
+    publishNextPoll(cars[pick]);
     lastServed = pick;
   }
 
@@ -1113,6 +1199,15 @@ void statusJson(JsonDocument& d) {
     o["profile"] = cc.profile;
     o["profile_name"] = prof.name;
     o["last_error"] = c.lastError;
+    {
+      const char* why;
+      uint32_t ms = msUntilNextPoll(c, now, why);
+      o["next_poll_s"] = ms == UINT32_MAX ? -1 : (int32_t)(ms / 1000);
+      o["next_why"] = why;
+      o["charging_mode"] = c.charging;
+      o["interval_s"] = c.charging ? cfg.chargeIntervalSec : slowAwake(c) ? cfg.awakeSlowSec : cfg.normalIntervalSec;
+      o["quick_retry"] = c.quickRetries;
+    }
     o["cycles"] = c.pollCycles;
     JsonArray arr = o["pids"].to<JsonArray>();
     for (size_t i = 0; i < prof.pids.size() && i < c.states.size(); i++) {
@@ -1123,7 +1218,7 @@ void statusJson(JsonDocument& d) {
       if (!isnan(s.value)) po["value"] = serialized(String(s.value, p.precision));
       po["age_s"] = s.lastOk ? (int32_t)((now - s.lastOk) / 1000) : -1;
       if (s.lastPoll) {
-        uint32_t el = now - s.lastPoll, iv = p.interval * 1000UL;
+        uint32_t el = now - s.lastPoll, iv = intervalMs(c, p);
         po["next_s"] = el >= iv ? 0 : (iv - el) / 1000;
       } else po["next_s"] = 0;
       po["error"] = s.err;

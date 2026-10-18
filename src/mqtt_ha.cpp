@@ -92,7 +92,7 @@ void publishProfile(int car) {
 static const char* const FIXED[][2] = {   // fixed per-car entities: component, object id
   {"sensor", "voltage_12v"}, {"binary_sensor", "car"}, {"binary_sensor", "car_awake"},
   {"binary_sensor", "battery_low"}, {"switch", "polling"}, {"sensor", "ble_rssi"},
-  {"sensor", "last_error"}, {"sensor", "profile"}, {"sensor", "last_data"}, {"button", "check_now"}};
+  {"sensor", "last_error"}, {"sensor", "profile"}, {"sensor", "last_data"}, {"sensor", "next_poll"}, {"button", "check_now"}};
 
 static void removeCar(int car) {
   for (auto& id : announced[car]) removeConfig(car, "sensor", id);
@@ -184,9 +184,10 @@ static size_t sendCarDiscovery(int car) {
     d["entity_category"] = "diagnostic";
     publishConfig(car, "sensor", "ble_rssi", d);
   }
-  { // Check now: voltage check right away, polls only if the car is awake (doesn't wake a sleeping car)
+  { // Poll now: 12 V check right away, polls all values only if the car is awake (never wakes a sleeping car).
+    // Object id / topic stay "check_now" / "check/set" so existing entity ids and automations keep working.
     JsonDocument d;
-    d["name"] = "Check now";
+    d["name"] = "Poll now";
     d["command_topic"] = carTopic(car, "check/set");
     d["payload_press"] = "PRESS";
     d["icon"] = "mdi:car-search";
@@ -199,6 +200,14 @@ static size_t sendCarDiscovery(int car) {
     d["device_class"] = "timestamp";
     d["icon"] = "mdi:clock-check-outline";
     publishConfig(car, "sensor", "last_data", d);
+  }
+  { // Next poll: when the bridge serves this car next (connect, 12 V check or poll)
+    JsonDocument d;
+    d["name"] = "Next poll";
+    d["state_topic"] = carTopic(car, "next_poll");
+    d["device_class"] = "timestamp";
+    d["icon"] = "mdi:timer-sand";
+    publishConfig(car, "sensor", "next_poll", d);
   }
   { // Last error – publish current state immediately (overwrites old retained value)
     String le = Poller::lastErrorText(car);
@@ -263,7 +272,7 @@ static void onMessage(char* t, byte* payload, unsigned int len) {
   }
   for (int i = 0; i < NCARS; i++) {
     if (!cfg.cars[i].enabled) continue;
-    if (tp == carTopic(i, "check/set")) { Poller::requestCheckNow(i); continue; }
+    if (tp == carTopic(i, "check/set")) { Poller::requestPollNow(i); continue; }
     if (tp != carTopic(i, "polling/set")) continue;
     bool on = v == "ON" || v == "1" || v == "TRUE";
     if (on || v == "OFF" || v == "0" || v == "FALSE") Poller::requestEnabled(i, on);
@@ -273,7 +282,7 @@ static void onMessage(char* t, byte* payload, unsigned int len) {
 void begin() {
   mqtt.setCallback(onMessage);
   mqtt.setBufferSize(1536);
-  mqtt.setKeepAlive(30);
+  mqtt.setKeepAlive(60);   // a BLE GATT timeout blocks the loop for up to 30 s – the broker must not drop us
 }
 
 bool connected() { return mqtt.connected(); }

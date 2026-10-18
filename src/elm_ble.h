@@ -13,6 +13,7 @@ void setTxPower(int dbm);            // Bluetooth transmit power (dBm), clamped 
 void shutdown();                    // turn Bluetooth off completely (frees RAM, e.g. for the online update)
 bool connect(const CarConfig& car, String& err);   // that car's dongle (MAC/UUIDs/PIN); disconnects any other first
 void disconnect();
+bool lastFailInRange();              // last connect() failed after the link was up (e.g. subscribe) → retry soon
 extern volatile bool quiet;         // true = don't log connect/disconnect (car asleep, checked every minute)
 bool connected();                   // any dongle connected
 bool connectedTo(const CarConfig& car);   // this car's dongle connected

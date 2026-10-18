@@ -54,6 +54,7 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <li><a href="#update">Updating the firmware</a></li>
 <li><a href="#backup">Backup &amp; restore</a></li>
 <li><a href="#battery">12 V battery &amp; saving power</a></li>
+<li><a href="#led">Status LED</a></li>
 <li><a href="#troubleshooting">Troubleshooting</a></li>
 <li><a href="#glossary">Glossary</a></li>
 </ol>
@@ -126,12 +127,11 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <h2>5. The interface</h2>
 <table>
 <tr><th>Tab</th><th>What for?</th></tr>
-<tr><td><b>Status</b></td><td>Current values, connection status (WiFi, MQTT, Bluetooth), log. One card per car with its values, connection and last error. <b>Poll now</b> fetches new values for that car immediately. Log buttons: <b>Copy</b>, <b>Download</b>, <b>Delete</b>.</td></tr>
+<tr><td><b>Status</b></td><td>Current values, connection status (WiFi, MQTT, Bluetooth), log. One card per car with its values, connection and last error. <b>Poll now</b> fetches new values for that car immediately (a sleeping car is not woken). Under the OBD line: when the next poll happens. Log buttons: <b>Copy</b>, <b>Download</b>, <b>Delete</b>.</td></tr>
 <tr><td><b>Profile</b></td><td>Which values are polled, how often (column “Interval s”) and how they are calculated. <b>Test</b> lets you try any value immediately.</td></tr>
 <tr><td><b>Terminal</b></td><td>For advanced users: send commands directly to the dongle.</td></tr>
-<tr><td><b>Settings</b></td><td>WiFi, MQTT, dongle, polling times, time of day, password for the interface.</td></tr>
+<tr><td><b>Settings</b></td><td>WiFi, cars and dongles, polling times, status LED, MQTT, time of day, password for the interface.</td></tr>
 <tr><td><b>System</b></td><td>Version, reason of the last restart, restart, factory profiles, backup &amp; restore, changelog, firmware update.</td></tr>
-<tr><td><b>🇩🇪/🇬🇧</b></td><td>Language of the interface, the device messages and the Home Assistant names. The choice is stored on the device.</td></tr>
 </table>
 <h3>Important settings</h3>
 <table>
@@ -140,9 +140,13 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <tr><td>12V minimum voltage</td><td>Below this value no polling takes place, to protect the 12 V battery.</td><td>12.2 V</td></tr>
 <tr><td>Car asleep below</td><td>If the 12 V voltage is below this value, the car is off and not charging. The bridge then sends <b>no requests to the car</b> (each one would wake it up) and only measures the voltage at the dongle once a minute. As soon as the car wakes up by itself (driving, charging, preconditioning, 12 V top-up), normal polling resumes. An awake IONIQ 5 is at about 14.7 V, a sleeping one at 12.4–12.8 V. With a 12 V lithium battery (resting voltage ~13.3 V) raise the value to about 13.6 V. 0 = always poll.</td><td>13.2 V</td></tr>
 <tr><td>12V warning below</td><td>If the 12 V voltage drops below this value, Home Assistant reports “12V low” (and the log a warning). Good for a notification before the battery is flat. 0 = off.</td><td>12.0 V</td></tr>
-<tr><td>Check 12V while car is asleep</td><td>While the car sleeps only the 12 V is checked (does not wake the car), every N minutes. The Home Assistant button “Check now” (or the button on the Status card) checks right away – useful in an automation when the charger starts, so polling begins without waiting.</td><td>30</td></tr>
-<tr><td>Poll while car is asleep</td><td>Poll once every N minutes even while asleep (briefly wakes the car). 0 = never. “Poll now” always polls.</td><td>0</td></tr>
-<tr><td>Reconnect attempt after</td><td>Waiting time if the dongle is not reachable (car away).</td><td>60 s</td></tr>
+<tr><td>Check 12V while car is asleep</td><td>While the car sleeps only the 12 V is checked (does not wake the car), every N minutes. The Home Assistant button “Poll now” (or the button on the Status card) checks right away – useful in an automation when the charger starts, so polling begins without waiting.</td><td>30</td></tr>
+<tr><td>Poll while car is asleep</td><td>Poll once every N minutes even while asleep (briefly wakes the car). 0 = never. “Poll now” does not wake a sleeping car (12 V check only).</td><td>0</td></tr>
+<tr><td>Poll interval while charging</td><td>Interval for all values while the car charges (AC or DC, PIDs “charging” / “charging_dc” = 1). PIDs with a longer profile interval (odometer, SOH) keep theirs. 0 = profile intervals.</td><td>60 s</td></tr>
+<tr><td>Poll interval when awake</td><td>Interval while the car is awake and not charging. 0 = profile intervals.</td><td>300 s</td></tr>
+<tr><td>Awake, not charging: polls, then slower</td><td>After this many polls at the awake interval (car awake but not charging), the bridge switches to the slower interval below. Charging, waking up and Poll now start the count again.</td><td>3</td></tr>
+<tr><td>… then poll every</td><td>Slow interval when awake and not charging. 0 = never slower.</td><td>1800 s</td></tr>
+<tr><td>Dongle not found – next attempt after</td><td>Waiting time if the dongle is not reachable (car away). “Poll now” connects immediately.</td><td>30 min</td></tr>
 <tr><td>Pause when car does not respond</td><td>Waiting time if the car is asleep.</td><td>600 s</td></tr>
 <tr><td>Keep BLE connected permanently</td><td>“no” = dongle may sleep between polls (recommended).</td><td>no</td></tr>
 <tr><td>IP address</td><td>“automatic (DHCP)” or a static address. “Use current values” fills in IP, mask, gateway and DNS of the running connection. The address must be outside the router's DHCP range. If the static IP does not work after the restart (no WiFi or MQTT broker not reachable), the bridge automatically uses DHCP and reports this in the log and under System.</td><td>DHCP</td></tr>
@@ -177,7 +181,15 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <h3>Range</h3>
 <p>The range shown in the cockpit cannot be read. “Range (calculated)” estimates it from SoC × battery capacity ÷ consumption. Adapt the formula to your car, e.g. <code>B34/2/100*63/0.17</code> for 63 kWh and 17 kWh/100 km.</p>
 <h3>How often is polled?</h3>
-<p>Column <b>Interval s</b> in the profile: SoC every 120 s, temperatures every 300 s, odometer every 1800 s. Values with the same command are best polled with the same interval.</p>
+<p>Set under Settings → Polling, the same for both cars:</p>
+<table>
+<tr><th>Car state</th><th>Interval</th></tr>
+<tr><td>Charging (AC or DC – value “Charging” or “DC charging” = 1)</td><td>every 60 s</td></tr>
+<tr><td>Awake, not charging</td><td>3 polls every 5 min, then every 30 min</td></tr>
+<tr><td>Asleep (12 V below “Car asleep below”)</td><td>no queries – only the 12 V is checked every 30 min</td></tr>
+<tr><td>Dongle not found</td><td>next attempt after 30 min (after a failed setup with the dongle in range: 2 quick retries after 60 s)</td></tr>
+</table>
+<p>Values with a longer interval in the profile (odometer, SOH) keep their own. The car card shows when the next poll happens; Home Assistant has the sensor “Next poll”. <b>Poll now</b> polls right away – a sleeping car is not woken, only its 12 V is checked.</p>
 </section>
 
 <section id="custom">
@@ -222,6 +234,26 @@ mark{background:#ffe58a;color:#000;border-radius:3px;padding:0 1px}
 <li>If the 12 V voltage drops below the minimum voltage, polling is paused.</li>
 <li>If you do not drive for a longer time (holiday): unplug the dongle.</li>
 </ul>
+</section>
+
+<section id="led">
+<h2>10a. Status LED</h2>
+<p>ESP32-S3 and ESP32-C3 boards have an RGB LED that shows what the bridge is doing. With two cars it shows the car currently being served; the most important state wins (e.g. a firmware update over everything else).</p>
+<table>
+<tr><th>LED</th><th>Meaning</th></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#3b82f6;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Blue, slow blink</td><td>Connecting to the dongle (searching / pairing)</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#22c55e;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Green, flash per reply</td><td>Polling – each flash is one reply from the car</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#15803d;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Dim green</td><td>Idle between polls (or connected, waiting)</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#1e40af;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Short blue pulse every 5 s</td><td>Car asleep – only the 12 V is checked</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#eab308;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Yellow</td><td>Dongle not found / no data from an awake car</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#f97316;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Orange</td><td>WiFi OK, MQTT broker not connected</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#e5e7eb;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>White, slow blink</td><td>No WiFi connection</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#a855f7;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Purple, slow blink</td><td>Setup hotspot active (no WiFi configured / reachable)</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#06b6d4;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Cyan, fast blink</td><td>Firmware update running</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#ef4444;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Red, fast blink</td><td>Safe mode after repeated crashes</td></tr>
+<tr><td><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#00000000;border:1px solid #8888;vertical-align:-1px;margin-right:6px"></span>Off</td><td>Brightness 0, no LED GPIO set, or a board without RGB LED (classic ESP32)</td></tr>
+</table>
+<p><b>Settings → Status LED:</b> GPIO of the LED (default 48 on the ESP32-S3, 8 on the C3) and brightness (0 = off). Not sure which GPIO? Enter a number and press <b>Test</b> – that GPIO lights red, green, blue for 3 s, no saving needed. Most S3 boards use 48, some 38.</p>
 </section>
 
 <section id="troubleshooting">

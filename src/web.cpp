@@ -436,8 +436,8 @@ void begin() {
 
   server.on("/api/checknow", HTTP_POST, [](AsyncWebServerRequest* r) {
     if (!auth(r)) return;
-    Poller::requestCheckNow(carParam(r, 0));
-    sendMsg(r, true, "Check started");
+    Poller::requestPollNow(carParam(r, 0));   // old endpoint: same as Poll now
+    sendMsg(r, true, "Poll triggered");
   });
 
   server.on("/api/ledtest", HTTP_POST, [](AsyncWebServerRequest* r) {

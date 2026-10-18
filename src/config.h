@@ -57,7 +57,12 @@ struct AppConfig {
   uint32_t sleepPollMin = 0;            // poll anyway while the car sleeps: every N min (0 = never)
   uint32_t sleepCheckMin = 30;          // while asleep: check only the 12 V voltage every N min (doesn't wake the car)
   float lowBattVoltage = 12.0f;         // 12V warning (HA sensor "12V low"), 0 = off
-  uint32_t retrySec = 60;               // Pause after a failed BLE connection
+  uint32_t chargeIntervalSec = 60;      // poll interval while charging (AC or DC), 0 = profile intervals
+  uint32_t normalIntervalSec = 300;     // poll interval while awake and not charging, 0 = profile intervals
+                                        // (PIDs with a longer profile interval, e.g. odometer/SOH, keep theirs)
+  uint32_t awakeFastPolls = 3;          // awake, not charging: this many polls at normalIntervalSec …
+  uint32_t awakeSlowSec = 1800;         // … then every N s (0 = stay at normalIntervalSec)
+  uint32_t dongleRetryMin = 30;         // dongle not found → next attempt after N min
   uint32_t cmdTimeoutMs = 3000;
   bool keepConnected = false;           // Keep BLE connected between polls
   int bleTxPower = 9;                   // Bluetooth transmit power in dBm (classic ESP32: max 9, S3/C3: up to 20)
