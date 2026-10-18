@@ -1,27 +1,33 @@
 #pragma once
 #include <Arduino.h>
 #include <vector>
+#include "config.h"
 
-// BLE-Client für ELM327-kompatible OBD2-Dongles
+// BLE client for ELM327-compatible OBD2 dongles
 namespace ElmBle {
 
 struct ScanEntry { String mac, name; int rssi; bool addrRandom; bool likelyObd; };
 
 void begin();
-void shutdown();                    // Bluetooth ganz abschalten (gibt RAM frei, z. B. für das Online-Update)
-bool connect(String& err);          // nutzt cfg.bleMac / UUIDs (oder Auto-Erkennung)
+void setTxPower(int dbm);            // Bluetooth transmit power (dBm), clamped to what the chip supports
+void shutdown();                    // turn Bluetooth off completely (frees RAM, e.g. for the online update)
+bool connect(const CarConfig& car, String& err);   // that car's dongle (MAC/UUIDs/PIN); disconnects any other first
 void disconnect();
-extern volatile bool quiet;         // true = Verbinden/Trennen nicht loggen (Auto schläft, Prüfung jede Minute)
-bool connected();
-uint32_t dropCount();               // Zähler ungeplanter Verbindungsabbrüche
-bool relaxedParams();               // true = nach wiederholtem 0x208 auf langsame Verbindungsparameter umgestellt
+bool lastFailInRange();              // last connect() failed after the link was up (e.g. subscribe) → retry soon
+extern volatile bool quiet;         // true = don't log connect/disconnect (car asleep, checked every minute)
+bool connected();                   // any dongle connected
+bool connectedTo(const CarConfig& car);   // this car's dongle connected
+uint32_t dropCount();               // count of unplanned disconnects
+bool relaxedParams(const CarConfig& car);
+bool configured(const CarConfig& car);     // MAC (mac mode) or name (name mode) set
+String currentAddress(const CarConfig& car); // MAC, or in name mode the last address found ("" = not found yet)               // true = switched to slow connection parameters after repeated 0x208
 int  rssi();
-uint16_t mtu();                     // ausgehandelte MTU (0 = nicht verbunden)
-String detectedUuids();             // "svc / notify / write" nach erfolgreicher Verbindung
-String deviceName();                // Bluetooth-Name des Dongles (GAP-Name bzw. aus dem Scan)
-String dongleKind();                // grobe Typ-Erkennung anhand der UUIDs
+uint16_t mtu();                     // negotiated MTU (0 = not connected)
+String detectedUuids();             // "svc / notify / write" after a successful connection
+String deviceName(const CarConfig& car);                // Bluetooth name of the dongle (GAP name or from the scan)
+String dongleKind();                // rough type detection based on the UUIDs
 
-// Sendet einen Befehl und wartet auf den ELM-Prompt '>'. Rückgabe: Rohantwort (ohne '>')
+// Sends a command and waits for the ELM prompt '>'. Returns: raw response (without '>')
 bool command(const String& cmd, String& response, uint32_t timeoutMs);
 
 std::vector<ScanEntry> scan(uint32_t ms);

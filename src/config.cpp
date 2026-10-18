@@ -1,173 +1,31 @@
 #include "config.h"
 #include <LittleFS.h>
 #include "default_profiles.h"
-#include "i18n.h"
 #include "log.h"
-#include "obd_parse.h"
+
+AppConfig::AppConfig() {
+  cars[0].enabled = true;
+  cars[0].name = "IONIQ 5";
+  cars[0].deviceName = "IONIQ 5";
+  cars[0].mqttBase = "obd2mqtt/car1";
+  cars[0].profile = "ioniq5";
+  cars[1].name = "EV6";
+  cars[1].deviceName = "EV6";
+  cars[1].mqttBase = "obd2mqtt/car2";
+  cars[1].profile = "ev6";
+}
 
 AppConfig cfg;
-Profile profile;
+Profile profiles[NCARS];
 const char* MASK = "********";
 
 static const char* CONFIG_FILE = "/config.json";
 
 bool fsBegin() {
-  if (!LittleFS.begin(true)) return false;   // formatiert bei Bedarf
+  if (!LittleFS.begin(true)) return false;   // formats if needed
   if (!LittleFS.exists("/profiles")) LittleFS.mkdir("/profiles");
   installDefaultProfiles(false);
   return true;
-}
-
-// Gespeicherte Profile reparieren (ab 0.3.11):
-//  - ATFCSM1 ohne ATFCSD: der ELM327 lehnt Flow-Control-Modus 1 dann ab ("?"), die Flow-Control geht an
-//    die falsche Adresse und mehrteilige Antworten bleiben aus (Fehler im WiCAN-XPeng-Profil, von uns übernommen)
-//  - 7DF-Abfragen bei festem Empfangsfilter (ATCRA) können nie antworten → abschalten
-void migrateProfiles() {
-  for (auto& name : listProfiles()) {
-    String raw = readProfileRaw(name);
-    JsonDocument d;
-    if (raw.isEmpty() || deserializeJson(d, raw)) continue;
-    JsonArray init = d["init"].as<JsonArray>();
-    if (init.isNull()) continue;
-    bool changed = false, hasFcsd = false, hasCra = false;
-    int fcsm1 = -1, i = 0;
-    for (JsonVariant v : init) {
-      String c = v.as<String>();
-      c.toUpperCase();
-      c.replace(" ", "");
-      if (c.startsWith("ATFCSD")) hasFcsd = true;
-      if (c.startsWith("ATCRA") && c.length() > 5) hasCra = true;
-      if (c == "ATFCSM1" && fcsm1 < 0) fcsm1 = i;
-      i++;
-    }
-    if (fcsm1 >= 0 && !hasFcsd) {
-      JsonDocument n;
-      JsonArray na = n.to<JsonArray>();
-      int k = 0;
-      for (JsonVariant v : init) { if (k++ == fcsm1) na.add("ATFCSD300000"); na.add(v.as<String>()); }
-      d["init"] = na;
-      changed = true;
-    }
-    if (hasCra) {
-      for (JsonObject o : d["pids"].as<JsonArray>()) {
-        String h = o["header"] | "";
-        h.toUpperCase();
-        if (h == "7DF" && (o["enabled"] | true)) { o["enabled"] = false; changed = true; }
-      }
-    }
-    // Reichweite: alte Formel "…/100*<kWh>/<kWh pro km>" → "…*CAP/CONS" + Akku-Werte im Profil
-    for (JsonObject o : d["pids"].as<JsonArray>()) {
-      String f = o["formula"] | "";
-      int k = f.indexOf("/100*");
-      if (k < 0) continue;
-      String rest = f.substring(k + 5);
-      int sl = rest.indexOf('/');
-      if (sl <= 0) continue;
-      float cap = rest.substring(0, sl).toFloat(), cons = rest.substring(sl + 1).toFloat();
-      bool numeric = true;
-      for (char ch : rest) if (!(isdigit((unsigned char)ch) || ch == '.' || ch == '/')) numeric = false;
-      if (!numeric || cap <= 0 || cons <= 0 || cons >= 1) continue;
-      o["formula"] = f.substring(0, k) + "*CAP/CONS";
-      if (!(d["battery_kwh"] | 0.0f)) d["battery_kwh"] = cap;
-      if (!(d["consumption"] | 0.0f)) d["consumption"] = round(cons * 1000) / 10.0;
-      changed = true;
-    }
-    // Werksprofil-Ableger: Akku-Auswahlliste und (falls unverändert) neue Init-Befehle übernehmen
-    for (auto& dp : DEFAULT_PROFILES) {
-      if (name != dp.file) continue;
-      JsonDocument fac;
-      if (deserializeJson(fac, FPSTR(dp.json))) break;
-      // Lade-Werte beim Einschlafen auf 0 (sleep_zero) wie im Werksprofil
-      for (JsonObject fo : fac["pids"].as<JsonArray>()) {
-        if (!(fo["sleep_zero"] | false)) continue;
-        for (JsonObject o : d["pids"].as<JsonArray>())
-          if (String(o["id"] | "") == String(fo["id"] | "") && !(o["sleep_zero"] | false)) { o["sleep_zero"] = true; changed = true; }
-      }
-      if (d["battery_options"].isNull() && !fac["battery_options"].isNull()) {
-        JsonArray bo = d["battery_options"].to<JsonArray>();
-        for (JsonObject o : fac["battery_options"].as<JsonArray>()) {
-          JsonObject n = bo.add<JsonObject>();
-          n["name"] = (g_lang == 1 && o["name_en"].is<const char*>()) ? o["name_en"] : o["name"];
-          n["kwh"] = o["kwh"];
-        }
-        if (!(d["battery_kwh"] | 0.0f)) d["battery_kwh"] = fac["battery_kwh"];
-        if (!(d["consumption"] | 0.0f)) d["consumption"] = fac["consumption"];
-        changed = true;
-      }
-      // IONIQ 5: Lade-Bits aus 220101 Byte 12 funktionieren nicht (immer 0) → Erkennung über den HV-Strom
-      if (String(dp.file) == "ioniq5") {
-        JsonArray pids = d["pids"].as<JsonArray>();
-        auto has = [&](const char* id) { for (JsonObject o : pids) if (String(o["id"] | "") == id) return true; return false; };
-        for (JsonObject o : pids) {
-          String f = o["formula"] | "";
-          for (JsonObject fo : fac["pids"].as<JsonArray>()) {
-            String id = fo["id"] | "";
-            if (id != String(o["id"] | "")) continue;
-            if ((id == "charging" && f == "bit(B12,7)") || (id == "charging_dc" && f == "bit(B12,6)")) {
-              o["formula"] = fo["formula"];
-              o["name"] = (g_lang == 1 && fo["name_en"].is<const char*>()) ? fo["name_en"] : fo["name"];
-              changed = true;
-            }
-          }
-        }
-        for (const char* id : {"hv_current", "hv_voltage", "charge_power"}) {
-          if (has(id)) continue;
-          for (JsonObject fo : fac["pids"].as<JsonArray>()) {
-            if (String(fo["id"] | "") != id) continue;
-            JsonObject n = pids.add<JsonObject>();
-            for (JsonPair kv : fo) if (String(kv.key().c_str()) != "name_en") n[kv.key()] = kv.value();
-            if (g_lang == 1 && fo["name_en"].is<const char*>()) n["name"] = fo["name_en"];
-            changed = true;
-          }
-        }
-      }
-      // XPeng: Ladeleistung / Laden aktiv / DC-Laden aus HV-Strom × HV-Spannung ergänzen (0.3.21),
-      // Ladestatus heißt neutral „Rohwert“ (am G9 kommt beim AC-Laden 1, nicht 3 wie bei XPCarData)
-      if (String(dp.file) == "g9" || String(dp.file) == "g6" || String(dp.file) == "p7plus") {
-        JsonArray pids = d["pids"].as<JsonArray>();
-        auto has = [&](const char* id) { for (JsonObject o : pids) if (String(o["id"] | "") == id) return true; return false; };
-        for (JsonObject o : pids) {
-          if (String(o["id"] | "") != "charge_status") continue;
-          String nm = o["name"] | "";
-          if (nm.startsWith("Ladestatus (0=nein") || nm.startsWith("Charging status (0=no")) {
-            for (JsonObject fo : fac["pids"].as<JsonArray>())
-              if (String(fo["id"] | "") == "charge_status") {
-                o["name"] = (g_lang == 1 && fo["name_en"].is<const char*>()) ? fo["name_en"] : fo["name"];
-                changed = true;
-              }
-          }
-        }
-        if (has("hv_current") && has("hv_voltage")) {
-          for (const char* id : {"charge_power", "charging", "charging_dc"}) {
-            if (has(id)) continue;
-            for (JsonObject fo : fac["pids"].as<JsonArray>()) {
-              if (String(fo["id"] | "") != id) continue;
-              JsonObject n = pids.add<JsonObject>();
-              for (JsonPair kv : fo) if (String(kv.key().c_str()) != "name_en") n[kv.key()] = kv.value();
-              if (g_lang == 1 && fo["name_en"].is<const char*>()) n["name"] = fo["name_en"];
-              changed = true;
-            }
-          }
-        }
-      }
-      // IONIQ 5: alte Werks-Init (ATST96/ATSTFF ohne ATAT0) → neue mit ATAT0 + fester Flow-Control
-      if (String(dp.file) == "ioniq5") {
-        String cur;
-        for (JsonVariant v : d["init"].as<JsonArray>()) { cur += v.as<String>(); cur += ' '; }
-        cur.trim();
-        if (cur == "ATZ ATE0 ATL0 ATS0 ATH0 ATSP6 ATST96" || cur == "ATZ ATE0 ATL0 ATS0 ATH0 ATSP6 ATSTFF") {
-          d["init"] = fac["init"];
-          changed = true;
-        }
-      }
-      break;
-    }
-    if (changed) {
-      File f = LittleFS.open(String("/profiles/") + name + ".json", "w");
-      if (f) { serializeJsonPretty(d, f); f.close(); }
-      logf(T("Profil '%s' aktualisiert (Init-Befehle / Akku-Werte / Reichweiten-Formel)", "Profile '%s' updated (init commands / battery values / range formula)"), name.c_str());
-    }
-  }
 }
 
 bool validProfileName(const String& n) {
@@ -181,21 +39,8 @@ void installDefaultProfiles(bool overwrite) {
   for (auto& d : DEFAULT_PROFILES) {
     String path = String("/profiles/") + d.file + ".json";
     if (!overwrite && LittleFS.exists(path)) continue;
-    // Wertenamen je nach Sprache (name_en), Hilfsfelder danach entfernen
-    JsonDocument doc;
-    if (deserializeJson(doc, FPSTR(d.json))) continue;
-    if (g_lang == 1 && doc["name_en"].is<const char*>()) doc["name"] = doc["name_en"];
-    doc.remove("name_en");
-    for (JsonObject o : doc["pids"].as<JsonArray>()) {
-      if (g_lang == 1 && o["name_en"].is<const char*>()) o["name"] = o["name_en"];
-      o.remove("name_en");
-    }
-    for (JsonObject o : doc["battery_options"].as<JsonArray>()) {
-      if (g_lang == 1 && o["name_en"].is<const char*>()) o["name"] = o["name_en"];
-      o.remove("name_en");
-    }
     File f = LittleFS.open(path, "w");
-    if (f) { serializeJsonPretty(doc, f); f.close(); }
+    if (f) { f.print(FPSTR(d.json)); f.close(); }
   }
 }
 
@@ -219,29 +64,72 @@ void configToJson(JsonDocument& d, bool mask) {
   d["mqtt_pass"] = secret(cfg.mqttPass);
   d["mqtt_base"] = cfg.mqttBase;
   d["ha_prefix"] = cfg.haPrefix;
-  d["device_name"] = cfg.deviceName;
-  d["ble_mac"] = cfg.bleMac;
-  d["ble_addr_type"] = cfg.bleAddrType;
-  d["ble_service"] = cfg.bleService;
-  d["ble_notify"] = cfg.bleNotify;
-  d["ble_write"] = cfg.bleWrite;
-  d["ble_name"] = cfg.bleName;
-  d["ble_pin"] = cfg.blePin;
-  d["profile"] = cfg.profile;
-  d["poll_enabled"] = cfg.pollEnabled;
+  JsonArray cars = d["cars"].to<JsonArray>();
+  for (auto& c : cfg.cars) {
+    JsonObject o = cars.add<JsonObject>();
+    o["enabled"] = c.enabled;
+    o["name"] = c.name;
+    o["device_name"] = c.deviceName;
+    o["mqtt_base"] = c.mqttBase;
+    o["ble_match"] = c.bleMatch;
+    o["ble_mac"] = c.bleMac;
+    o["ble_addr_type"] = c.bleAddrType;
+    o["ble_service"] = c.bleService;
+    o["ble_notify"] = c.bleNotify;
+    o["ble_write"] = c.bleWrite;
+    o["ble_name"] = c.bleName;
+    o["ble_pin"] = c.blePin;
+    o["profile"] = c.profile;
+    o["poll_enabled"] = c.pollEnabled;
+  }
   d["min_voltage"] = cfg.minVoltage;
   d["sleep_voltage"] = cfg.sleepVoltage;
   d["sleep_poll_min"] = cfg.sleepPollMin;
+  d["sleep_check_min"] = cfg.sleepCheckMin;
   d["low_batt_voltage"] = cfg.lowBattVoltage;
-  d["retry_sec"] = cfg.retrySec;
+  d["charge_interval_sec"] = cfg.chargeIntervalSec;
+  d["normal_interval_sec"] = cfg.normalIntervalSec;
+  d["dongle_retry_min"] = cfg.dongleRetryMin;
+  d["awake_fast_polls"] = cfg.awakeFastPolls;
+  d["awake_slow_sec"] = cfg.awakeSlowSec;
   d["cmd_timeout_ms"] = cfg.cmdTimeoutMs;
   d["keep_connected"] = cfg.keepConnected;
+  d["ble_tx_power"] = cfg.bleTxPower;
   d["backoff_sec"] = cfg.backoffSec;
+  d["led_pin"] = cfg.ledPin;
+  d["led_brightness"] = cfg.ledBrightness;
   d["ntp_server"] = cfg.ntpServer;
   d["tz"] = cfg.tz;
   d["log_persist"] = cfg.logPersist;
   d["update_check"] = cfg.updateCheck;
-  d["lang"] = cfg.lang;
+}
+
+// Car settings from a JSON object; only keys that are present are changed
+static void carFromJson(JsonVariantConst s, CarConfig& c) {
+  auto str = [&](const char* k, String& dst) {
+    if (!s[k].is<const char*>()) return;
+    String v = s[k].as<String>();
+    v.trim();
+    dst = v;
+  };
+  if (s["enabled"].is<bool>()) c.enabled = s["enabled"];
+  str("name", c.name);
+  str("device_name", c.deviceName);
+  str("mqtt_base", c.mqttBase);
+  while (c.mqttBase.endsWith("/")) c.mqttBase.remove(c.mqttBase.length() - 1);
+  str("ble_match", c.bleMatch);
+  if (c.bleMatch != "name") c.bleMatch = "mac";
+  str("ble_mac", c.bleMac);
+  c.bleMac.toUpperCase();
+  str("ble_addr_type", c.bleAddrType);
+  str("ble_service", c.bleService);
+  str("ble_notify", c.bleNotify);
+  str("ble_write", c.bleWrite);
+  str("ble_name", c.bleName);
+  str("ble_pin", c.blePin);
+  { String d; for (char ch : c.blePin) if (isdigit((unsigned char)ch)) d += ch; c.blePin = d.substring(0, 6); }
+  str("profile", c.profile);
+  if (s["poll_enabled"].is<bool>()) c.pollEnabled = s["poll_enabled"];
 }
 
 void configFromJson(JsonVariantConst s) {
@@ -270,37 +158,46 @@ void configFromJson(JsonVariantConst s) {
   str("mqtt_pass", cfg.mqttPass, true);
   str("mqtt_base", cfg.mqttBase);
   str("ha_prefix", cfg.haPrefix);
-  str("device_name", cfg.deviceName);
-  str("ble_mac", cfg.bleMac);
-  cfg.bleMac.toUpperCase();
-  str("ble_addr_type", cfg.bleAddrType);
-  str("ble_service", cfg.bleService);
-  str("ble_notify", cfg.bleNotify);
-  str("ble_write", cfg.bleWrite);
-  str("ble_name", cfg.bleName);
-  str("ble_pin", cfg.blePin);
-  { String d; for (char c : cfg.blePin) if (isdigit((unsigned char)c)) d += c; cfg.blePin = d.substring(0, 6); }
-  str("profile", cfg.profile);
-  if (s["poll_enabled"].is<bool>()) cfg.pollEnabled = s["poll_enabled"];
+  if (s["cars"].is<JsonArrayConst>()) {
+    // [ {car 1 keys}, {car 2 keys} ] – an entry may be empty/null to leave that car unchanged
+    int i = 0;
+    for (JsonVariantConst c : s["cars"].as<JsonArrayConst>()) {
+      if (i >= NCARS) break;
+      if (c.is<JsonObjectConst>()) carFromJson(c, cfg.cars[i]);
+      i++;
+    }
+  } else if (s["ble_mac"].is<const char*>()) {
+    // Settings from v0.4 or older (one car, flat keys): they become car 1
+    carFromJson(s, cfg.cars[0]);
+    if (s["device_name"].is<const char*>()) cfg.cars[0].name = cfg.cars[0].deviceName;
+    cfg.cars[0].mqttBase = "";   // the old flat "mqtt_base" is the bridge base → car 1 gets <base>/car1 below
+  }
   if (s["min_voltage"].is<float>()) cfg.minVoltage = s["min_voltage"];
   if (s["sleep_voltage"].is<float>()) cfg.sleepVoltage = constrain(s["sleep_voltage"].as<float>(), 0.0f, 16.0f);
   if (s["low_batt_voltage"].is<float>()) cfg.lowBattVoltage = constrain(s["low_batt_voltage"].as<float>(), 0.0f, 15.0f);
   if (s["sleep_poll_min"].is<int>()) cfg.sleepPollMin = max(0, s["sleep_poll_min"].as<int>());
-  if (s["retry_sec"].is<int>()) cfg.retrySec = max(10, s["retry_sec"].as<int>());
+  if (s["sleep_check_min"].is<int>()) cfg.sleepCheckMin = constrain(s["sleep_check_min"].as<int>(), 1, 240);
+  if (s["charge_interval_sec"].is<int>()) cfg.chargeIntervalSec = constrain(s["charge_interval_sec"].as<int>(), 0, 86400);
+  if (s["normal_interval_sec"].is<int>()) cfg.normalIntervalSec = constrain(s["normal_interval_sec"].as<int>(), 0, 86400);
+  if (s["awake_fast_polls"].is<int>()) cfg.awakeFastPolls = constrain(s["awake_fast_polls"].as<int>(), 0, 100);
+  if (s["awake_slow_sec"].is<int>()) cfg.awakeSlowSec = constrain(s["awake_slow_sec"].as<int>(), 0, 86400);
+  if (s["dongle_retry_min"].is<int>()) cfg.dongleRetryMin = constrain(s["dongle_retry_min"].as<int>(), 1, 240);
   if (s["cmd_timeout_ms"].is<int>()) cfg.cmdTimeoutMs = constrain(s["cmd_timeout_ms"].as<int>(), 500, 15000);
   if (s["keep_connected"].is<bool>()) cfg.keepConnected = s["keep_connected"];
+  if (s["ble_tx_power"].is<int>()) cfg.bleTxPower = constrain(s["ble_tx_power"].as<int>(), 0, BLE_TX_MAX);
   if (s["backoff_sec"].is<int>()) cfg.backoffSec = max(0, s["backoff_sec"].as<int>());
+  if (s["led_pin"].is<int>()) cfg.ledPin = constrain(s["led_pin"].as<int>(), -1, 48);
+  if (s["led_brightness"].is<int>()) cfg.ledBrightness = constrain(s["led_brightness"].as<int>(), 0, 100);
   str("ntp_server", cfg.ntpServer);
   str("tz", cfg.tz);
   if (cfg.ntpServer.isEmpty()) cfg.ntpServer = "pool.ntp.org";
-  if (cfg.tz.isEmpty()) cfg.tz = "CET-1CEST,M3.5.0,M10.5.0/3";
+  if (cfg.tz.isEmpty()) cfg.tz = "MYT-8";
   if (s["log_persist"].is<bool>()) cfg.logPersist = s["log_persist"];
   if (s["update_check"].is<bool>()) cfg.updateCheck = s["update_check"];
-  str("lang", cfg.lang);
-  if (cfg.lang != "en") cfg.lang = "de";
-  g_lang = cfg.lang == "en" ? 1 : 0;
   if (cfg.hostname.isEmpty()) cfg.hostname = "obd2mqtt";
   if (cfg.mqttBase.isEmpty()) cfg.mqttBase = "obd2mqtt";
+  for (int i = 0; i < NCARS; i++)
+    if (cfg.cars[i].mqttBase.isEmpty()) cfg.cars[i].mqttBase = cfg.mqttBase + "/car" + String(i + 1);
   if (cfg.haPrefix.isEmpty()) cfg.haPrefix = "homeassistant";
 }
 
@@ -363,11 +260,11 @@ bool parseProfile(JsonVariantConst s, Profile& p, String& err) {
     d.enabled = j["enabled"] | true;
     d.sleepZero = j["sleep_zero"] | false;
 
-    if (!validProfileName(d.id)) { err = String(T("Ungültige ID: '", "Invalid ID: '")) + d.id + "' (a-z, 0-9, _ -)"; return false; }
-    if (d.header.length() && !isHex(d.header)) { err = d.id + T(": Header muss hex sein", ": header must be hex"); return false; }
-    if (!isHex(d.cmd) || d.cmd.length() % 2) { err = d.id + T(": Befehl muss hex sein (z.B. 220105)", ": command must be hex (e.g. 220105)"); return false; }
-    if (d.formula.isEmpty()) { err = d.id + T(": Formel fehlt", ": formula missing"); return false; }
-    for (auto& o : p.pids) if (o.id == d.id) { err = String(T("Doppelte ID: ", "Duplicate ID: ")) + d.id; return false; }
+    if (!validProfileName(d.id)) { err = String("Invalid ID: '") + d.id + "' (a-z, 0-9, _ -)"; return false; }
+    if (d.header.length() && !isHex(d.header)) { err = d.id + ": header must be hex"; return false; }
+    if (!isHex(d.cmd) || d.cmd.length() % 2) { err = d.id + ": command must be hex (e.g. 220105)"; return false; }
+    if (d.formula.isEmpty()) { err = d.id + ": formula missing"; return false; }
+    for (auto& o : p.pids) if (o.id == d.id) { err = String("Duplicate ID: ") + d.id; return false; }
     p.pids.push_back(d);
   }
   return true;
@@ -406,27 +303,25 @@ String readProfileRaw(const String& name) {
   return s;
 }
 
-bool loadProfile(const String& name) {
+bool loadProfile(const String& name, Profile& out) {
   String raw = readProfileRaw(name);
   if (raw.isEmpty()) return false;
   JsonDocument d;
   if (deserializeJson(d, raw)) return false;
   String err;
-  if (!parseProfile(d.as<JsonVariantConst>(), profile, err)) return false;
-  ObdParse::setBattery(profile.batteryKwh, profile.consumption);
-  return true;
+  return parseProfile(d.as<JsonVariantConst>(), out, err);
 }
 
 bool saveProfileRaw(const String& name, const String& json, String& err) {
-  if (!validProfileName(name)) { err = T("Ungültiger Profilname", "Invalid profile name"); return false; }
+  if (!validProfileName(name)) { err = "Invalid profile name"; return false; }
   JsonDocument d;
-  if (auto e = deserializeJson(d, json)) { err = String(T("JSON-Fehler: ", "JSON error: ")) + e.c_str(); return false; }
+  if (auto e = deserializeJson(d, json)) { err = String("JSON error: ") + e.c_str(); return false; }
   Profile tmp;
   if (!parseProfile(d.as<JsonVariantConst>(), tmp, err)) return false;
   JsonDocument clean;
   profileToJson(tmp, clean);
   File f = LittleFS.open("/profiles/" + name + ".json", "w");
-  if (!f) { err = T("Schreibfehler", "Write error"); return false; }
+  if (!f) { err = "Write error"; return false; }
   serializeJsonPretty(clean, f);
   f.close();
   return true;

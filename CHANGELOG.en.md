@@ -1,5 +1,82 @@
 # Changelog
 
+## 0.7.9
+- Manual (Help): new section “Status LED” with all colours, and an updated “How often is polled?” (charging / awake / asleep / dongle not found intervals); old language-switch row removed
+- Settings → Status LED: colour legend instead of the long hint text
+
+## 0.7.8
+- One button instead of two: “Check now” is merged into “Poll now” (Status card and Home Assistant). In HA the existing button keeps its entity id and is now named “Poll now” – automations keep working. Works even with the Polling switch off
+
+## 0.7.7
+- “Poll now” no longer wakes a sleeping car: below the sleep voltage only the 12 V is checked (log: “car is asleep … not woken”); an awake car is polled in full as before
+
+## 0.7.6
+- Car card: the next poll / 12V check is shown on its own line under the OBD line, so it fits on phones
+
+## 0.7.5
+- Awake but not charging: 3 polls every 5 min, then every 30 min (settings “Awake, not charging: polls at that interval, then slower” and “… then poll every”). Charging starting or stopping, the car waking up, Check now and Poll now start the count again; the log notes the switch
+
+## 0.7.4
+- Car card shows when the car is served next: “next poll 20:05 (in 4 min 12 s) · every 5 min”, “every 1 min (charging)”, “next 12V check …” while asleep, “next attempt …” when the dongle was not found, “retry 1/2 …” after a failed setup, or “polling off” – counts down every second
+- New Home Assistant sensor “Next poll” per car (timestamp)
+
+## 0.7.3
+- “Subscribe failed” (dongle connected but refused the notification setup): retried after 60 s, up to 2 times, instead of waiting 30 min – the dongle is clearly in range. The log now shows the signal strength (RSSI) with this error
+- MQTT keepalive 60 s (was 30 s): a hanging Bluetooth step (up to 30 s) no longer makes the broker drop the connection
+
+## 0.7.2
+- New poll intervals in Settings → Polling, for both cars: every 60 s while charging (AC or DC, from the PIDs “charging” / “charging_dc”), every 300 s when awake and not charging. PIDs with a longer profile interval (odometer, SOH) keep theirs; 0 = use the profile intervals
+- Dongle not found: next attempt after 30 min (setting, replaces “Reconnect attempt after” 60 s). “Check now” in Home Assistant still connects immediately
+- Log shows when a car starts or stops charging and the interval used
+
+## 0.7.1
+- Status LED (RGB LED on ESP32-S3/C3 boards): blue blinking = connecting, green = polling (flash per reply), dim green = idle, short blue pulse = car asleep, yellow = dongle not found / no data, orange = MQTT down, white / purple blinking = no WiFi / setup hotspot, cyan = firmware update, red blinking = safe mode
+- Settings → Status LED: GPIO (default 48 on the S3, 8 on the C3, none on the classic ESP32), brightness, and a Test button that lights a GPIO red, green, blue to find the board's LED
+
+## 0.7.0
+- New web interface layout, made for phones: tab bar at the bottom on phones, at the top on wide screens
+- Status: the live log comes first (car names in colour, errors in red, “Full log” for more lines); each car card shows its state (Asleep / Awake / AC or DC charging), last data and three tiles – 12V, SoC, Charging – with “Show all values” for the rest; OBD connection, Check now, Poll now and the Polling switch at the bottom of the card
+- Diagnostics moved to the System tab; the car dropdown in the header is gone – Terminal, Test and Diagnostics each have their own car choice
+- ESP32-S3 support: own firmware files (…-esp32s3-ota.bin / -factory.bin); the build now also creates a factory.bin for the first USB flash
+- Settings → Bluetooth transmit power (ESP32: up to +9 dBm, ESP32-S3: up to +20 dBm) for more range
+- Firmware upload refuses files built for another chip; the online update only installs files for this board
+
+## 0.6.3
+- While the car is asleep the 12 V is checked every 30 min instead of every minute (setting “Check 12V while car is asleep every”)
+- New Home Assistant button “Check now” per car (and on the Status card): checks the 12 V right away; an awake car (e.g. AC charging) is polled immediately, a sleeping car is not woken. Use it in an automation, e.g. when the charger starts
+- “Poll now” is unchanged: it wakes the car for one full poll
+
+## 0.6.2
+- New Home Assistant sensor “Last data” per car: time of the last poll that delivered values. Bridge restarts no longer look like fresh data
+- Status card shows “last data: … ago” per car
+- If the first query of a cycle answers NO DATA (car asleep), the other queries (odometer, tyres …) are skipped, so they don't keep the car awake
+
+## 0.6.0
+- New: find the dongle by its Bluetooth name (Settings → Cars → Find dongle by) – for dongles whose MAC changes on every power-up, e.g. vLinker MC+. The bridge tries the last address first and only scans (approx. 4 s) when the dongle has a new address
+- Dongle scan: picking a dongle with a random address switches that car to “find by name” automatically
+- Two cars set to find their dongle by the same name are rejected when saving (they could not be told apart)
+
+## 0.5.0
+- New: two cars – one dongle per car, each with its own profile, MQTT base topic (default obd2mqtt/car1, obd2mqtt/car2) and Home Assistant device. One BLE connection at a time; the bridge serves whichever car is due
+- Settings → Cars: name, HA device name, base topic, profile and dongle per car; dongle scan with "Use for …" per car
+- Status: one card per car with its own polling switch and Poll now; car selector (top right) for Test, Terminal and diagnostic report
+- Profile: "Use for …" a car instead of Activate; new factory profile Kia EV6 (same E-GMP PIDs as the IONIQ 5)
+- Home Assistant: new "OBD2MQTT Bridge" device with the firmware update; polling switch per car
+- Upgrade from 0.4: existing dongle/profile settings become car 1; topics move to obd2mqtt/car1 – delete the old device in Home Assistant once
+- Firmware upload switches Bluetooth off completely while flashing (as in 0.4.1)
+
+## 0.4.1
+- Firmware upload (System → Firmware update) switches Bluetooth off completely while flashing – lower current, against brownout restarts during the upload. Interim version to install 0.5
+
+## 0.4.0
+- English only: web interface, manual, log messages, Home Assistant names and factory profile; language switch removed. Manual now at /help (/hilfe redirects)
+- Only the Hyundai IONIQ 5 / Kia EV6 profile is included (XPeng profiles removed); startup repair of old profiles removed
+- New: tyre pressure (bar) and temperature for all four tyres (TPMS 7A0 / 22C00B)
+- Faster web interface: pages sent gzip-compressed and cached (304), log only fetched when it changes, lighter status polling, polling paused in hidden browser tabs
+- Test and Terminal now run between values of a poll cycle instead of waiting for the whole cycle
+- Less load in the main loop: BLE signal read every 2 s, file system usage cached, log written to flash in batches
+- Online update checks github.com/anas-ivs/obd2mqtt; default time zone Malaysia (MYT-8)
+
 ## 0.3.23
 - New: online update (System → Online update) – checks the latest release on GitHub, shows the changes since the installed version and installs the *-esp32-ota.bin directly from the internet at the push of a button (encrypted connection with certificate check, size and image check, then restart)
 - Automatic check 3 min after start and then daily (can be switched off in the settings); a new version is noted in the log

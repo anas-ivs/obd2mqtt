@@ -1,7 +1,7 @@
 #pragma once
-// Wurzelzertifikate für die HTTPS-Verbindung zu GitHub (api.github.com, github.com,
-// release-assets/objects.githubusercontent.com). Aus dem Mozilla-CA-Bestand; mehrere Wurzeln, damit ein
-// Zertifikatswechsel bei GitHub (Sectigo/USERTrust bzw. DigiCert) das Online-Update nicht sofort bricht.
+// Root certificates for the HTTPS connection to GitHub (api.github.com, github.com,
+// release-assets/objects.githubusercontent.com). From the Mozilla CA store; multiple roots so that a
+// certificate change at GitHub (Sectigo/USERTrust or DigiCert) doesn't immediately break the online update.
 static const char GH_ROOT_CAS[] PROGMEM =
   "-----BEGIN CERTIFICATE-----\n"
   "MIICjzCCAhWgAwIBAgIQXIuZxVqUxdJxVt7NiYDMJjAKBggqhkjOPQQDAzCBiDEL\n"

@@ -1,5 +1,5 @@
 #pragma once
-// Plattformunabhängig (auch auf dem PC testbar): ELM327-Antwort parsen + Formel auswerten
+// Platform-independent (also testable on a PC): parse ELM327 response + evaluate formula
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -8,22 +8,22 @@
 namespace ObdParse {
 
 enum ErrKind { ERR_NONE, ERR_NO_DATA, ERR_INCOMPLETE, ERR_CAN, ERR_NRC, ERR_OTHER };
-extern ErrKind lastErrKind;          // Art des letzten Fehlers von parseResponse()
+extern ErrKind lastErrKind;          // kind of the last error from parseResponse()
 
-// Erwartetes Antwort-Präfix: 1. Byte + 0x40, Rest gleich ("220105" → "620105", "015B" → "415B")
+// Expected response prefix: 1st byte + 0x40, rest unchanged ("220105" → "620105", "015B" → "415B")
 std::string expectedPrefix(const std::string& cmd);
 
-// Wandelt die ELM-Rohantwort (ATH0, ATCAF1, ATS0 oder ATS1) in Bytes um.
-// Unterstützt Single-Frame, Multi-Frame ("03E / 0: .. / 1: ..") und mehrere antwortende ECUs.
-// bytes beginnt mit dem Service-Byte (z.B. 0x62).
+// Converts the raw ELM response (ATH0, ATCAF1, ATS0 or ATS1) to bytes.
+// Supports single-frame, multi-frame ("03E / 0: .. / 1: ..") and multiple responding ECUs.
+// bytes starts with the service byte (e.g. 0x62).
 bool parseResponse(const std::string& raw, const std::string& cmd,
                    std::vector<uint8_t>& bytes, std::string& err);
 
-// Formel mit Variablen B0..Bn und Funktionen u16(hi,lo), s16(hi,lo), s8(x), bit(x,n)
-// Akku-Werte des aktiven Profils für Formeln: CAP = nutzbare Kapazität (kWh), CONS = Verbrauch (kWh/100 km)
+// Formula with variables B0..Bn and functions u16(hi,lo), s16(hi,lo), s8(x), bit(x,n)
+// Battery values of the active profile for formulas: CAP = usable capacity (kWh), CONS = consumption (kWh/100 km)
 void setBattery(double capKwh, double consKwh100);
 void getBattery(double& capKwh, double& consKwh100);
-// Letzte Werte der anderen PIDs als Variablen (Name = PID-ID), z. B. "-I*hv_voltage/1000"
+// Last values of the other PIDs as variables (name = PID ID), e.g. "-I*hv_voltage/1000"
 void setValues(const std::vector<std::pair<std::string, double>>& v);
 bool evalFormula(const std::string& formula, const std::vector<uint8_t>& bytes,
                  double& value, std::string& err);
