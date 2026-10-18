@@ -1,6 +1,8 @@
 # OBD2MQTT – BLE-OBD2 → MQTT → Home Assistant
 
-> **Beta.** Tested on a Hyundai IONIQ 5.
+> **Beta.** Tested on a Hyundai IONIQ 5 and a Kia EV6 (two cars, one bridge) with an ESP32-S3.
+>
+> Fork of **OBD2MQTT by [Frank Fuerniss (EIBHomeControl)](https://github.com/EIBHomeControl)**, who wrote the original firmware (v0.1 – v0.3.23). This fork (v0.4 and later) is maintained by [anas-ivs](https://github.com/anas-ivs) – see [Credits](#credits).
 
 **[⬇ Download: latest firmware (Releases)](../../releases/latest)** · [Manual](docs/manual_en.html) · [Changelog](CHANGELOG.en.md)
 
@@ -23,7 +25,10 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 - **Test button** per PID: shows every response byte with its index so you can easily find byte positions
 - ELM327 terminal in the browser
 - MQTT auto-discovery: sensors appear automatically as a device in Home Assistant
-- 12 V protection (ATRV), pause when the car doesn't respond, BLE disconnects between polls so the dongle can sleep
+- **Lets the car sleep:** below the sleep voltage only the 12 V is checked (every 30 min) – no CAN requests, so the car is never woken; "Poll now" doesn't wake it either
+- **Smart poll intervals** (both cars): every 60 s while charging (AC/DC), 3 × every 5 min when awake, then every 30 min; dongle not found → next attempt after 30 min
+- Car card shows when the next poll happens (with countdown); Home Assistant sensors "Last data" and "Next poll"
+- 12 V protection (ATRV), BLE disconnects between polls so the dongle can sleep
 - Setup access point with captive portal, mDNS (`http://obd2mqtt.local`), OTA updates, optional password protection
 - **Online update** from the GitHub releases: daily check, changelog of the new version, install with one click (web interface or Home Assistant update entity)
 - Watchdog with automatic restart and safe mode
@@ -32,7 +37,9 @@ Car (OBD2 dongle) ──Bluetooth LE──► ESP32 in the garage ──WiFi─�
 
 ## What you need
 
-- **ESP32 dev board** (classic ESP32, e.g. ESP32-DevKitC V4) with a USB power supply, within BLE range of the car
+- **ESP32 board** with a USB power supply, within BLE range of the car:
+  - **recommended: ESP32-S3** (e.g. N16R8 dev board, ideally with an external antenna) – more BLE range (up to +20 dBm), RGB status LED, USB-C
+  - classic ESP32 (e.g. ESP32-DevKitC V4) also works (BLE up to +9 dBm, no RGB LED)
 - **Bluetooth LE OBD2 dongle**, ELM327-compatible, e.g. vLinker MC+/FS, Veepeak BLE+, OBDLink CX, Vgate iCar Pro BLE or WiCAN Pro (BLE + protocol "elm327", PIN under Settings → Cars). *Classic Bluetooth (SPP) dongles without "LE" do not work.*
 - Home Assistant with an MQTT broker (e.g. the Mosquitto add-on)
 
@@ -63,7 +70,7 @@ After `pio run` both files are copied to `firmware/` automatically. To move to a
 2. **Settings → WiFi**: enter SSID and password, then **MQTT**: broker, user and password.
 3. **Cars**: park the car with the dongle plugged in nearby, then click "Scan for dongles". Entries marked with ★ are most likely OBD adapters. Click "Use for …" for car 1. For a second car, enable car 2 and assign its own dongle the same way.
 4. "Save & restart". Afterwards the interface is available at `http://obd2mqtt.local` or the assigned IP address.
-5. **Profile**: select the matching profile and click "Use for …" the car. Choose the car at the top right and click "Test" next to `soc` to check that a value comes back.
+5. **Profile**: select the matching profile and click "Use for …" the car. Pick the car next to the Test area and click "Test" next to `soc` to check that a value comes back.
 
 ## Profiles
 
@@ -146,8 +153,9 @@ Discovery is published under `homeassistant/<component>/obd2mqtt_xxxxxx_car1_<id
 
 ## Notes
 
-- **Let the car sleep:** every OBD request wakes the car. If the 12 V voltage is below 13.2 V (car off, not charging), the bridge sends no requests and only watches the voltage; as soon as the car wakes up by itself, normal polling resumes. Adjustable under Settings → Polling.
-- **12 V battery:** by default the car is polled only every 120 s, BLE is disconnected in between and polling pauses below 12.2 V. If the car doesn't respond (it's asleep), the bridge waits 10 min. Use a dongle with auto-sleep (e.g. Vgate iCar Pro BLE, vLinker MC+/FS BLE, OBDLink CX).
+- **Let the car sleep:** every OBD request wakes the car. If the 12 V voltage is below the sleep threshold (default 13.2 V – car off, not charging), the bridge sends no requests and only checks the voltage every 30 min; as soon as the car wakes up by itself, normal polling resumes. "Poll now" never wakes a sleeping car. Adjustable under Settings → Polling.
+- **Poll intervals** (Settings → Polling, same for both cars): charging every 60 s; awake but not charging 3 polls every 5 min, then every 30 min; dongle not found → next attempt after 30 min (after a failed setup with the dongle in range: 2 quick retries after 60 s). Values with a longer profile interval (odometer, SOH) keep their own.
+- **12 V battery:** BLE is disconnected between polls and polling pauses below 12.2 V. If the car doesn't respond, the bridge waits 10 min. Use a dongle with auto-sleep (e.g. Vgate iCar Pro BLE, vLinker MC+/FS BLE, OBDLink CX).
 - **When does the car respond?** On the IONIQ 5 the BMS usually only responds with ignition on or while charging. While asleep you get `NO DATA`. The last value is kept in Home Assistant (retained).
 - Only **BLE** dongles (Bluetooth 4.0+) are supported, no Bluetooth Classic adapters (SPP).
 - **Dongle quality matters:** cheap clones ("OBDII v1.5", MTU 23) often deliver long multi-frame responses truncated – the bridge retries, but values arrive later and the log shows retries. Good dongles (WiCAN Pro, vLinker, Vgate iCar 2S Pro, OBDLink CX; MTU 247) are noticeably more reliable. A BLE dongle accepts only **one** connection: close OBD apps on your phone (or switch off Bluetooth) while the bridge is running.
@@ -182,10 +190,13 @@ Not affiliated with Hyundai, Kia, MeatPi or any dongle manufacturer. Brand and p
 
 This firmware was developed with AI assistance.
 
-## Thanks
+## Credits
 
-[evDash](https://github.com/nickn17/evDash), [WiCAN](https://github.com/meatpiHQ/wican-fw), OVMS and the community on the ABRP feedback board and in the forums.
+- **Original author: Frank Fuerniss ([EIBHomeControl](https://github.com/EIBHomeControl))** – created OBD2MQTT: BLE ELM327 client, profiles and formula engine, web interface, MQTT / Home Assistant discovery, sleep mode, watchdog & safe mode, online update (v0.1 – v0.3.23). Thank you for the excellent base and for releasing it under the MIT license.
+- **This fork: [anas-ivs](https://github.com/anas-ivs)** – v0.4 and later: English only, two cars, find dongle by name, tyre values, ESP32-S3 support, new phone-friendly web UI, status LED, smart poll intervals, "Next poll". Developed with AI assistance (Claude Code).
+- **PID research and vehicle data:** [evDash](https://github.com/nickn17/evDash) (nickn17), [WiCAN](https://github.com/meatpiHQ/wican-fw) (MeatPi – vehicle profiles), OVMS (Open Vehicle Monitoring System), and the community on the ABRP feedback board and in the forums.
+- **Libraries:** [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) (h2zero), [ESPAsyncWebServer](https://github.com/ESP32Async/ESPAsyncWebServer) / [AsyncTCP](https://github.com/ESP32Async/AsyncTCP) (ESP32Async), [ArduinoJson](https://github.com/bblanchon/ArduinoJson) (bblanchon), [PubSubClient](https://github.com/knolleary/pubsubclient) (knolleary), [tinyexpr](https://github.com/codeplea/tinyexpr) (codeplea), Arduino-ESP32 / ESP-IDF (Espressif).
 
 ## License
 
-[MIT](LICENSE). Bundled/used libraries are subject to their own licenses: NimBLE-Arduino (Apache 2.0), ESPAsyncWebServer / AsyncTCP (LGPL 3.0), ArduinoJson (MIT), PubSubClient (MIT), tinyexpr (zlib, included in `lib/tinyexpr`).
+[MIT](LICENSE) – original copyright © 2026 Frank Fuerniss; the MIT license and its copyright notice apply to this fork as well. Bundled/used libraries are subject to their own licenses: NimBLE-Arduino (Apache 2.0), ESPAsyncWebServer / AsyncTCP (LGPL 3.0), ArduinoJson (MIT), PubSubClient (MIT), tinyexpr (zlib, included in `lib/tinyexpr`).
